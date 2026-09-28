@@ -1,4 +1,4 @@
-name: Build OrangeFox - mojito
+name: Build OrangeFox - Redmi Note 10 Mojito
 
 on:
   workflow_dispatch:
@@ -7,17 +7,45 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    env:
+      FOX_PATH: ${{ github.workspace }}/orangefox
+
     steps:
 
-      # ==========================================
-      # 1. Checkout
-      # ==========================================
+      # =========================================================
+      # 1. Checkout this repository
+      # =========================================================
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ==========================================
-      # 2. Install dependencies
-      # ==========================================
+
+      # =========================================================
+      # 2. Free GitHub runner disk space
+      # =========================================================
+
+      - name: Free disk space
+        run: |
+          set -euxo pipefail
+
+          echo "Disk before cleanup:"
+          df -h
+
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+
+          sudo docker system prune -af || true
+
+          echo "Disk after cleanup:"
+          df -h
+
+
+      # =========================================================
+      # 3. Install build dependencies
+      # =========================================================
+
       - name: Install dependencies
         run: |
           set -euxo pipefail
@@ -35,30 +63,42 @@ jobs:
             g++-multilib \
             gcc-multilib \
             git \
+            git-lfs \
             gnupg \
+            gperf \
             imagemagick \
             lib32ncurses5-dev \
             lib32readline-dev \
             lib32z1-dev \
+            libelf-dev \
             liblz4-tool \
             libncurses5 \
             libncurses5-dev \
             libssl-dev \
+            libxml2 \
             libxml2-utils \
             lzop \
             pngcrush \
             rsync \
+            schedtool \
+            squashfs-tools \
             unzip \
             xsltproc \
             zip \
             zlib1g-dev
 
+          git lfs install
+
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
-      # ==========================================
-      # 3. Install repo
-      # ==========================================
+          git config --global color.ui false
+
+
+      # =========================================================
+      # 4. Install repo
+      # =========================================================
+
       - name: Install repo
         run: |
           set -euxo pipefail
@@ -73,9 +113,12 @@ jobs:
 
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      # ==========================================
-      #
-        - name: Clone OrangeFox sync tools
+
+      # =========================================================
+      # 5. Clone OrangeFox sync tools
+      # =========================================================
+
+      - name: Clone OrangeFox sync tools
         run: |
           set -euxo pipefail
 
@@ -88,101 +131,178 @@ jobs:
             https://gitlab.com/OrangeFox/sync.git \
             OrangeFox_sync
 
+          chmod +x \
+            OrangeFox_sync/sync/orangefox_sync.sh
+
+
+      # =========================================================
+      # 6. Sync OrangeFox 12.1
+      # =========================================================
+
       - name: Sync OrangeFox 12.1
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
+          rm -rf "$FOX_PATH"
 
-          chmod +x sync/orangefox_sync.sh
+          mkdir -p "$FOX_PATH"
 
-          ./sync/orangefox_sync.sh \
+          cd "$GITHUB_WORKSPACE/OrangeFox_sync/sync"
+
+          ./orangefox_sync.sh \
             --branch 12.1 \
-            --path "$GITHUB_WORKSPACE/orangefox"
-      # ==========================================
-      # 5. Sync OrangeFox
-      # ==========================================
-      - name: Sync OrangeFox
+            --path "$FOX_PATH"
+
+
+      # =========================================================
+      # 7. Check OrangeFox source
+      # =========================================================
+
+      - name: Check OrangeFox source
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE/orangefox"
-
-          repo sync \
-            --force-sync \
-            --no-clone-bundle \
-            --no-tags \
-            --optimized-fetch \
-            --prune \
-            -c \
-            -j"$(nproc --all)"
-
-      # ==========================================
-      # 6. Check device tree
-      # ==========================================
-      - name: Check mojito device tree
-        run: |
-          set -euxo pipefail
-
-          cd "$GITHUB_WORKSPACE/orangefox"
+          cd "$FOX_PATH"
 
           echo "======================================"
-          echo "Checking mojito device tree"
+          echo "OrangeFox source"
           echo "======================================"
 
-          if [ ! -d "device/xiaomi/mojito" ]; then
-            echo "ERROR:"
-            echo "device/xiaomi/mojito does not exist."
-            echo ""
-            echo "The workflow cannot continue without"
-            echo "a compatible OrangeFox/TWRP device tree."
-            exit 1
-          fi
+          test -d build
+          test -d bootable/recovery
+          test -d vendor/recovery
 
-          echo "Device tree found."
-
-          ls -la device/xiaomi/mojito
-
-      # ==========================================
-      # 7. Debug vendorsetup.sh
-      # ==========================================
-      - name: Debug vendorsetup
-        run: |
-          set -euxo pipefail
-
-          cd "$GITHUB_WORKSPACE/orangefox"
-
-          echo "======================================"
-          echo "vendorsetup.sh"
-          echo "======================================"
-
-          if [ ! -f "device/xiaomi/mojito/vendorsetup.sh" ]; then
-            echo "ERROR: vendorsetup.sh does not exist."
-            exit 1
-          fi
-
-          echo "File exists."
+          echo "OrangeFox source OK."
 
           echo ""
-          echo "----- FILE CONTENT -----"
+          echo "Disk usage:"
+          du -sh "$FOX_PATH" || true
 
-          cat device/xiaomi/mojito/vendorsetup.sh
 
-          echo ""
-          echo "----- SHELL CHECK -----"
+      # =========================================================
+      # 8. Clone Mojito device tree
+      # =========================================================
 
-          bash -n device/xiaomi/mojito/vendorsetup.sh
-
-          echo "vendorsetup.sh syntax OK."
-
-      # ==========================================
-      # 8. Prepare build environment
-      # ==========================================
-      - name: Prepare OrangeFox build environment
+      - name: Clone Mojito device tree
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE/orangefox"
+          cd "$FOX_PATH"
+
+          rm -rf device/xiaomi/mojito
+
+          git clone \
+            --depth=1 \
+            --branch android-12.1 \
+            https://github.com/TeamWin/android_device_xiaomi_mojito.git \
+            device/xiaomi/mojito
+
+
+      # =========================================================
+      # 9. Clone SM6150 common tree
+      # =========================================================
+
+      - name: Clone SM6150 common tree
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          rm -rf device/xiaomi/sm6150-common
+
+          git clone \
+            --depth=1 \
+            --branch android-12.1 \
+            https://github.com/TeamWin/android_device_xiaomi_sm6150-common.git \
+            device/xiaomi/sm6150-common
+
+
+      # =========================================================
+      # 10. Clone Mojito kernel
+      # =========================================================
+
+      - name: Clone Mojito kernel
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          rm -rf kernel/xiaomi/mojito
+
+          mkdir -p kernel/xiaomi
+
+          git clone \
+            --depth=1 \
+            https://github.com/nebrassy/android_kernel_xiaomi_mojito.git \
+            kernel/xiaomi/mojito
+
+
+      # =========================================================
+      # 11. Verify device tree
+      # =========================================================
+
+      - name: Verify device tree
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "======================================"
+          echo "MOJITO DEVICE TREE"
+          echo "======================================"
+
+          test -f device/xiaomi/mojito/BoardConfig.mk
+          test -f device/xiaomi/mojito/twrp_mojito.mk
+          test -f device/xiaomi/mojito/AndroidProducts.mk
+          test -f device/xiaomi/mojito/device.mk
+
+          echo ""
+          echo "BoardConfig:"
+          cat device/xiaomi/mojito/BoardConfig.mk
+
+          echo ""
+          echo "Product:"
+          cat device/xiaomi/mojito/twrp_mojito.mk
+
+          echo ""
+          echo "Dependencies:"
+          cat device/xiaomi/mojito/twrp.dependencies || true
+
+
+      # =========================================================
+      # 12. Verify kernel
+      # =========================================================
+
+      - name: Verify kernel
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "======================================"
+          echo "MOJITO KERNEL"
+          echo "======================================"
+
+          test -d kernel/xiaomi/mojito
+
+          test -f kernel/xiaomi/mojito/Makefile
+
+          echo "Kernel found."
+
+          echo ""
+          echo "Kernel size:"
+          du -sh kernel/xiaomi/mojito
+
+
+      # =========================================================
+      # 13. Prepare build environment
+      # =========================================================
+
+      - name: Prepare build environment
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
 
           export ALLOW_MISSING_DEPENDENCIES=true
           export LC_ALL=C
@@ -195,112 +315,56 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "Loading mojito vendorsetup"
+          echo "Testing lunch target"
           echo "======================================"
 
-          set +e
-
-          source device/xiaomi/mojito/vendorsetup.sh
-
-          STATUS=$?
-
-          set -e
-
-          if [ "$STATUS" -ne 0 ]; then
-            echo ""
-            echo "======================================"
-            echo "vendorsetup.sh FAILED"
-            echo "exit code: $STATUS"
-            echo "======================================"
-
-            exit "$STATUS"
-          fi
+          lunch twrp_mojito-eng
 
           echo ""
-          echo "vendorsetup.sh loaded successfully."
+          echo "Lunch completed."
 
           echo ""
-          echo "======================================"
-          echo "OrangeFox variables"
-          echo "======================================"
+          echo "TARGET_PRODUCT=$TARGET_PRODUCT"
+          echo "TARGET_DEVICE=$TARGET_DEVICE"
 
-          env | grep -E '^(FOX_|OF_|TW_)' || true
 
-      # ==========================================
-      # 9. Find valid lunch target
-      # ==========================================
-      - name: Find mojito lunch target
-        run: |
-          set -euxo pipefail
+      # =========================================================
+      # 14. Build OrangeFox
+      # =========================================================
 
-          cd "$GITHUB_WORKSPACE/orangefox"
-
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-
-          source build/envsetup.sh
-
-          echo "======================================"
-          echo "Searching for mojito targets"
-          echo "======================================"
-
-          lunch mojito-eng || true
-          lunch twrp_mojito-eng || true
-
-          echo ""
-          echo "Available mojito references:"
-          grep -R "PRODUCT_DEVICE.*mojito\|COMMON_LUNCH_CHOICES.*mojito" \
-            device/xiaomi/mojito \
-            2>/dev/null || true
-
-      # ==========================================
-      # 10. Build
-      # ==========================================
       - name: Build OrangeFox Recovery
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE/orangefox"
+          cd "$FOX_PATH"
 
           export ALLOW_MISSING_DEPENDENCIES=true
           export LC_ALL=C
 
           source build/envsetup.sh
 
-          echo "======================================"
-          echo "Build target detection"
-          echo "======================================"
-
-          TARGET=""
-
-          if lunch twrp_mojito-eng; then
-            TARGET="twrp_mojito-eng"
-          elif lunch mojito-eng; then
-            TARGET="mojito-eng"
-          else
-            echo "ERROR: No mojito lunch target found."
-            exit 1
-          fi
-
-          echo "Using target: $TARGET"
+          lunch twrp_mojito-eng
 
           echo ""
           echo "======================================"
-          echo "Starting OrangeFox build"
+          echo "STARTING BUILD"
           echo "======================================"
 
           mka recoveryimage
 
-      # ==========================================
-      # 11. Show output
-      # ==========================================
-      - name: Show Build Output
+
+      # =========================================================
+      # 15. Show output
+      # =========================================================
+
+      - name: Show build output
         if: always()
         run: |
           set +e
 
-          cd "$GITHUB_WORKSPACE/orangefox"
+          cd "$FOX_PATH"
 
+          echo ""
           echo "======================================"
           echo "BUILD OUTPUT"
           echo "======================================"
@@ -310,8 +374,9 @@ jobs:
             ls -lah out/target/product/mojito
 
             echo ""
-            echo "Recovery files:"
-            echo "--------------------------------------"
+            echo "======================================"
+            echo "RECOVERY FILES"
+            echo "======================================"
 
             find out/target/product/mojito \
               -maxdepth 1 \
@@ -329,16 +394,31 @@ jobs:
 
           fi
 
-      # ==========================================
-      # 12. Upload
-      # ==========================================
-      - name: Upload Recovery
+
+      # =========================================================
+      # 16. Upload recovery.img
+      # =========================================================
+
+      - name: Upload Recovery IMG
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox-mojito
+          name: OrangeFox-mojito-recovery
+          path: |
+            orangefox/out/target/product/mojito/recovery.img
+            orangefox/out/target/product/mojito/vendor_boot.img
+          if-no-files-found: warn
+
+
+      # =========================================================
+      # 17. Upload ZIP files if generated
+      # =========================================================
+
+      - name: Upload Recovery ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrangeFox-mojito-zip
           path: |
             orangefox/out/target/product/mojito/*.zip
-            orangefox/out/target/product/mojito/*.img
-            orangefox/out/target/product/mojito/recovery*
           if-no-files-found: warn
