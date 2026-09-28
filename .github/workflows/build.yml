@@ -41,10 +41,8 @@ jobs:
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox || true
           
           cd /mnt/orangefox
-          # تنزيل شجرة الجهاز وشجرة الهواوي/شيومي المشتركة
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
           
-          # حذف ملف التهيئة المعطوب
           rm -f device/xiaomi/mojito/vendorsetup.sh
 
       - name: Build OrangeFox
@@ -54,19 +52,17 @@ jobs:
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
-          # إعداد البيئة واختيار الهدف الصحيح لأورانج فوكس
           set +e
           source build/envsetup.sh
           lunch twrp_mojito-userdebug
           set -e
           
-          # بدء البناء
-          mka recoveryimage -j$(nproc)
+          # إجبار نظام البناء على تجميع ملف الريكفري والملف المضغوط
+          mka recoveryimage -j$(nproc) || mka bootimage -j$(nproc)
 
       - name: Upload Recovery
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox_Mojito_Recovery
-          path: |
-            /mnt/orangefox/out/target/product/mojito/*.img
-            /mnt/orangefox/out/target/product/mojito/*.zip
+          path: /mnt/orangefox/out/target/product/mojito/
+          if-no-files-found: warn
