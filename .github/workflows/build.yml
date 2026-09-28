@@ -92,48 +92,123 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
 
-      - name: Download OrangeFox sync script
+      # ============================================================
+      # CLONE THE COMPLETE ORANGEFOX SYNC REPOSITORY
+      # ============================================================
+
+      - name: Clone OrangeFox sync repository
         run: |
           set -euxo pipefail
 
-          mkdir -p "$GITHUB_WORKSPACE/OrangeFox_sync"
+          cd "$GITHUB_WORKSPACE"
 
-          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
+          rm -rf OrangeFox_sync
 
-          curl -L \
-            https://gitlab.com/OrangeFox/sync/-/raw/master/orangefox_sync.sh \
-            -o orangefox_sync.sh
+          git clone \
+            --depth=1 \
+            https://gitlab.com/OrangeFox/sync.git \
+            OrangeFox_sync
 
-          chmod +x orangefox_sync.sh
+          echo "============================================"
+          echo "ORANGEFOX SYNC REPOSITORY"
+          echo "============================================"
 
-          test -s orangefox_sync.sh
+          cd OrangeFox_sync
 
-          echo "OrangeFox sync script downloaded:"
-          ls -lh orangefox_sync.sh
+          echo "Repository:"
+          git remote -v
 
           echo ""
-          echo "Script help:"
-          ./orangefox_sync.sh --help || true
+          echo "Files:"
+          find . -maxdepth 2 -type f -print | sort | head -200
 
+          echo ""
+          echo "Checking sync script:"
+
+          SYNC_SCRIPT=$(find . \
+            -maxdepth 3 \
+            -type f \
+            -name 'orangefox_sync.sh' \
+            -print -quit)
+
+          if [ -z "$SYNC_SCRIPT" ]; then
+            echo "ERROR: orangefox_sync.sh not found."
+            exit 1
+          fi
+
+          echo "Found:"
+          echo "$SYNC_SCRIPT"
+
+          chmod +x "$SYNC_SCRIPT"
+
+          echo "$GITHUB_WORKSPACE/OrangeFox_sync/$SYNC_SCRIPT" \
+            > "$GITHUB_WORKSPACE/orangefox_sync_path.txt"
+
+          echo ""
+          echo "Checking patch directory:"
+
+          if [ -d patches ]; then
+            ls -lah patches
+          else
+            echo "ERROR: patches directory is missing."
+            exit 1
+          fi
+
+
+      # ============================================================
+      # SYNC ORANGEFOX 12.1
+      # ============================================================
 
       - name: Sync OrangeFox 12.1
         run: |
           set -euxo pipefail
 
+          SYNC_SCRIPT=$(cat "$GITHUB_WORKSPACE/orangefox_sync_path.txt")
+
+          echo "Using sync script:"
+          echo "$SYNC_SCRIPT"
+
+          echo ""
+          echo "Checking required patch:"
+
+          PATCH_FILE="$GITHUB_WORKSPACE/OrangeFox_sync/patches/patch-manifest-fox_12.1.diff"
+
+          if [ ! -f "$PATCH_FILE" ]; then
+            echo "ERROR: Required patch is missing:"
+            echo "$PATCH_FILE"
+
+            echo ""
+            echo "Available patches:"
+            find "$GITHUB_WORKSPACE/OrangeFox_sync/patches" \
+              -maxdepth 1 \
+              -type f \
+              -print | sort
+
+            exit 1
+          fi
+
+          echo "Patch found:"
+          ls -lh "$PATCH_FILE"
+
           rm -rf "$FOX_PATH"
 
           mkdir -p "$FOX_PATH"
 
-          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
-
+          echo ""
           echo "============================================"
           echo "SYNCING ORANGEFOX 12.1"
           echo "============================================"
 
-          ./orangefox_sync.sh \
+          cd "$(dirname "$SYNC_SCRIPT")"
+
+          ./$(basename "$SYNC_SCRIPT") \
             --branch 12.1 \
             --path "$FOX_PATH"
 
+
+      # ============================================================
+      # VERIFY SOURCE
+      # ============================================================
 
       - name: Verify OrangeFox source
         run: |
@@ -151,9 +226,17 @@ jobs:
           echo "OrangeFox source is ready."
 
           echo ""
-          echo "FOX_PATH:"
+          echo "Source:"
           pwd
 
+          echo ""
+          echo "Disk usage:"
+          du -sh . || true
+
+
+      # ============================================================
+      # DEVICE TREE
+      # ============================================================
 
       - name: Clone mojito device tree
         run: |
@@ -176,6 +259,10 @@ jobs:
           echo "Mojito device tree OK."
 
 
+      # ============================================================
+      # COMMON TREE
+      # ============================================================
+
       - name: Clone SM6150 common tree
         run: |
           set -euxo pipefail
@@ -194,6 +281,10 @@ jobs:
 
           echo "SM6150 common tree OK."
 
+
+      # ============================================================
+      # KERNEL
+      # ============================================================
 
       - name: Clone mojito kernel
         run: |
@@ -215,31 +306,9 @@ jobs:
           echo "Mojito kernel OK."
 
 
-      - name: Check device tree
-        run: |
-          set -euxo pipefail
-
-          cd "$FOX_PATH"
-
-          echo "============================================"
-          echo "DEVICE TREE"
-          echo "============================================"
-
-          find device/xiaomi/mojito \
-            -maxdepth 2 \
-            -type f \
-            -print | sort | head -100
-
-          echo ""
-          echo "============================================"
-          echo "COMMON TREE"
-          echo "============================================"
-
-          find device/xiaomi/sm6150-common \
-            -maxdepth 2 \
-            -type f \
-            -print | sort | head -100
-
+      # ============================================================
+      # ENVIRONMENT
+      # ============================================================
 
       - name: Setup Android environment
         shell: bash
@@ -266,10 +335,13 @@ jobs:
           echo "envsetup status: $STATUS"
 
           if [ "$STATUS" -ne 0 ]; then
-            echo "envsetup failed"
             exit "$STATUS"
           fi
 
+
+      # ============================================================
+      # LUNCH
+      # ============================================================
 
       - name: Lunch mojito
         shell: bash
@@ -289,14 +361,14 @@ jobs:
           lunch twrp_mojito-eng
 
           echo ""
-          echo "============================================"
-          echo "LUNCH RESULT"
-          echo "============================================"
-
           echo "TARGET_PRODUCT=${TARGET_PRODUCT:-}"
           echo "TARGET_DEVICE=${TARGET_DEVICE:-}"
           echo "TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT:-}"
 
+
+      # ============================================================
+      # BUILD
+      # ============================================================
 
       - name: Build OrangeFox
         shell: bash
@@ -323,6 +395,10 @@ jobs:
           mka recoveryimage
 
 
+      # ============================================================
+      # SHOW OUTPUT
+      # ============================================================
+
       - name: Show build outputs
         if: always()
         shell: bash
@@ -336,16 +412,6 @@ jobs:
           echo "============================================"
 
           ls -lah out/target/product/mojito 2>/dev/null || true
-
-          echo ""
-          echo "============================================"
-          echo "RECOVERY DIRECTORY"
-          echo "============================================"
-
-          find out/target/product/mojito/recovery \
-            -type f \
-            -print \
-            2>/dev/null || true
 
           echo ""
           echo "============================================"
@@ -371,7 +437,7 @@ jobs:
 
           echo ""
           echo "============================================"
-          echo "ALL RECOVERY FILES"
+          echo "RECOVERY FILES"
           echo "============================================"
 
           find out \
@@ -384,6 +450,10 @@ jobs:
             -print \
             2>/dev/null || true
 
+
+      # ============================================================
+      # ARTIFACTS
+      # ============================================================
 
       - name: Upload OrangeFox artifacts
         if: always()
