@@ -11,12 +11,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Maximize build space
-        uses: easimon/maximize-build-space@v5
-        with:
-          remove-dotnet: 'true'
-          remove-android: 'false'
-          remove-haskell: 'true'
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker image prune -a -f || true
+          sudo apt-get clean
 
       - name: Set up Build Environment
         run: |
