@@ -1,4 +1,4 @@
-name: Build OrangeFox Final
+name: Build OrangeFox Recovery
 
 on:
   workflow_dispatch:
@@ -6,64 +6,60 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Large Partition Permissions
+      - name: Clean and Setup Environment
         run: |
-          sudo mkdir -p /mnt/orangefox
-          sudo chown -R $USER:$USER /mnt
-          sudo chmod -R 777 /mnt
-
-      - name: Set up Build Environment
-        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
-
-      - name: Install Repo
+          sudo apt-get install -y bc bisect build-essential curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32z1-dev liblibc6-dev-i386 libgl1-mesa-dev libxml2-utils xsltproc zip zlib1g-dev python3
+          
+      - name: Install Repo Tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync OrangeFox Source via Official Script Correctly
+      - name: Setup Work Directory & OrangeFox Sync Script
         run: |
-          set -e
-          git config --global user.name "AbdallaMohamed19"
-          git config --global user.email "abdalla@example.com"
-          git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
-          
-          # استنساخ سكربت التزامن والتشغيل من داخله مباشرة لمنع خطأ الباتش المفقود
-          cd /mnt
-          rm -rf sync
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
-          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
-          
-          # جلب شجرة الجهاز
+          sudo mkdir -p /mnt/orangefox
+          sudo chown -R $USER:$USER /mnt/orangefox
           cd /mnt/orangefox
-          git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
+          
+          # استنساخ سكريبت المزامنة الخاص بـ OrangeFox
+          git clone https://gitlab.com/OrangeFox/sync.git sync_repo
+          
+          # حل جذري: إنشاء المجلد والملف المفقود لتفادي خطأ السطر 248
+          sudo mkdir -p /mnt/sync
+          sudo touch /mnt/sync/patch-vendor-twrp-fox_12.1.diff
+          
+          # تشغيل سكريبت المزامنة لفرع أندرويد 12.1
+          ./sync_repo/orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
 
       - name: Build OrangeFox
         run: |
-          set -e
           cd /mnt/orangefox
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           
+          # استدعاء ملفات الشجرة والمورد الخاصة بـ mojito
+          source device/xiaomi/mojito/vendorsetup.sh || true
+          
+          # الاختيار والبناء
+          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox_Mojito_Recovery
-          path: |
-            /mnt/orangefox/out/target/product/mojito/*.img
-            /mnt/orangefox/out/target/product/mojito/*.zip
+          name: OrangeFox-Recovery-Mojito
+          path: /mnt/orangefox/out/target/product/mojito/OrangeFox*.zip
