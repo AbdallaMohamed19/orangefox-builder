@@ -17,7 +17,6 @@ jobs:
           remove-dotnet: 'true'
           remove-android: 'false'
           remove-haskell: 'true'
-          remove-codeql: 'true'
 
       - name: Set up Build Environment
         run: |
@@ -33,6 +32,7 @@ jobs:
 
       - name: Sync OrangeFox Source & Device Tree
         run: |
+          set -e
           mkdir -p ~/orangefox
           cd ~/orangefox
           git config --global user.name "AbdallaMohamed19"
@@ -43,6 +43,7 @@ jobs:
 
       - name: Build OrangeFox
         run: |
+          set -e
           cd ~/orangefox
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
