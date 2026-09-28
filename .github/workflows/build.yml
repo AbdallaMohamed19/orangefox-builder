@@ -47,9 +47,11 @@ jobs:
         run: |
           set -e
           cd /mnt/orangefox
-          source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
-          lunch twrp_mojito-eng || lunch omni_mojito-eng
+          export FOX_BUILD_DEVICE=mojito
+          export LC_ALL="C"
+          source build/envsetup.sh
+          lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
