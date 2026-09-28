@@ -3,7 +3,7 @@ name: Build OrangeFox Mojito
 on:
   workflow_dispatch:
 
-env:env:
+env:
   DEVICE_TREE: https://gitlab.com/OrangeFox/device/mojito.git
   DEVICE_BRANCH: master
   DEVICE_PATH: device/xiaomi/mojito
