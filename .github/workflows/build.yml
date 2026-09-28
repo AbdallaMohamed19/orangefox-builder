@@ -74,21 +74,31 @@ jobs:
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
       # ==========================================
-      # 4. Initialize OrangeFox
-      # ==========================================
-      - name: Initialize OrangeFox
+      #
+        - name: Clone OrangeFox sync tools
         run: |
           set -euxo pipefail
 
-          mkdir -p "$GITHUB_WORKSPACE/orangefox"
+          cd "$GITHUB_WORKSPACE"
 
-          cd "$GITHUB_WORKSPACE/orangefox"
+          rm -rf OrangeFox_sync
 
-          repo init \
-            -u https://gitlab.com/OrangeFox/Manifest.git \
-            -b fox_12.1 \
-            --depth=1
+          git clone \
+            --depth=1 \
+            https://gitlab.com/OrangeFox/sync.git \
+            OrangeFox_sync
 
+      - name: Sync OrangeFox 12.1
+        run: |
+          set -euxo pipefail
+
+          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
+
+          chmod +x sync/orangefox_sync.sh
+
+          ./sync/orangefox_sync.sh \
+            --branch 12.1 \
+            --path "$GITHUB_WORKSPACE/orangefox"
       # ==========================================
       # 5. Sync OrangeFox
       # ==========================================
