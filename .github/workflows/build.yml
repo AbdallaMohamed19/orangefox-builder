@@ -42,8 +42,6 @@ jobs:
           
           cd /mnt/orangefox
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
-          
-          rm -f device/xiaomi/mojito/vendorsetup.sh
 
       - name: Build OrangeFox Recovery
         run: |
@@ -51,14 +49,15 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
-          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
+          
+          # استدعاء ملف التهيئة لتعريف الأهداف
+          [ -f device/xiaomi/mojito/vendorsetup.sh ] && source device/xiaomi/mojito/vendorsetup.sh || true
           
           source build/envsetup.sh
           
-          # تجربة الأهداف بشكل منفصل لضمان النجاح
-          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch twrp_mojito-userdebug || true
+          # إعداد الهدف المباشر للناء
+          lunch omni_mojito-eng || lunch twrp_mojito-eng || lunch fox_mojito-eng || true
           
-          # التجميع الفعلي
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
