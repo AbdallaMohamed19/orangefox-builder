@@ -11,10 +11,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Create Build Directory on Large Partition
+      - name: Setup Large Partition Permissions
         run: |
           sudo mkdir -p /mnt/orangefox
-          sudo chown -R $USER:$USER /mnt/orangefox
+          sudo chown -R $USER:$USER /mnt
+          sudo chmod -R 777 /mnt
 
       - name: Set up Build Environment
         run: |
@@ -34,13 +35,11 @@ jobs:
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           
-          # استخدام السكربت الرسمي المخصص للمزامنة
           cd /mnt
           git clone https://gitlab.com/OrangeFox/sync.git
           cd sync
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
           
-          # سحب شجرة الجهاز الخاصة بـ mojito
           cd /mnt/orangefox
           git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito.git -b fox_12.1 device/xiaomi/mojito
 
