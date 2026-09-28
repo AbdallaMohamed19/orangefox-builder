@@ -50,3 +50,11 @@ jobs:
         path: |
           fox/out/target/product/mojito/OrangeFox-*.zip
           fox/out/target/product/mojito/recovery.img
+- name: Maximize build space
+  uses: easimon/maximize-build-space@master
+  with:
+    remove-dotnet: 'true'
+    remove-android: 'false'
+    remove-haskell: 'true'
+    remove-codeql: 'true'
+    
