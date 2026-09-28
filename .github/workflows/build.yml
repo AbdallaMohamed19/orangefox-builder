@@ -41,7 +41,7 @@ jobs:
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
           
           cd /mnt/orangefox
-          git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito.git -b fox_12.1 device/xiaomi/mojito
+          git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
 
       - name: Build OrangeFox
         run: |
