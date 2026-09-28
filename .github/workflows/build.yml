@@ -5,7 +5,7 @@ on:
 
 env:
   DEVICE_TREE: https://gitlab.com/OrangeFox/device/mojito.git
-  DEVICE_BRANCH: fox_12.1
+  DEVICE_BRANCH: ""
   DEVICE_PATH: device/xiaomi/mojito
   FOX_BRANCH: "12.1"
   TARGET: twrp_mojito-eng
@@ -46,7 +46,20 @@ jobs:
 
       - name: Clone device tree
         run: |
-          git clone $DEVICE_TREE -b $DEVICE_BRANCH ~/fox/$DEVICE_PATH
+          if [ -n "$DEVICE_BRANCH" ]; then
+            git clone $DEVICE_TREE -b $DEVICE_BRANCH ~/fox/$DEVICE_PATH
+          else
+            git clone $DEVICE_TREE ~/fox/$DEVICE_PATH
+          fi
+
+      - name: Fix obsolete FOX_VERSION
+        run: |
+          cd ~/fox/$DEVICE_PATH
+          echo "--- before ---"
+          grep -rn "FOX_VERSION" . --exclude-dir=.git || true
+          grep -rl "FOX_VERSION" . --exclude-dir=.git | xargs -r sed -i 's/\bFOX_VERSION\b/FOX_MAINTAINER_PATCH_VERSION/g'
+          echo "--- after ---"
+          grep -rn "FOX_MAINTAINER_PATCH_VERSION" . --exclude-dir=.git || true
 
       - name: Build
         run: |
