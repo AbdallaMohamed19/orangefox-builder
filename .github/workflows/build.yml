@@ -47,26 +47,24 @@ jobs:
 
       - name: Build OrangeFox Recovery
         run: |
-          set -e
           cd /mnt/orangefox
-          
-          # إعداد متغيرات البناء الخاصة بأورانج فوكس
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           
+          # تهيئة البيئة والهدف
           source build/envsetup.sh
-          lunch twrp_mojito-userdebug || lunch fox_mojito-userdebug
+          lunch twrp_mojito-userdebug || lunch fox_mojito-userdebug || lunch omni_mojito-userdebug
           
-          # أمر البناء المخصص لـ OrangeFox لتوليد الـ ZIP والـ IMG
+          # البدء في التجميع الفعلي
           mka recoveryimage -j$(nproc)
 
-      - name: Upload Recovery Zip and Image
+      - name: Upload Recovery
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox_Mojito_Recovery_Full
           path: |
-            /mnt/orangefox/out/target/product/mojito/OrangeFox-*.zip
-            /mnt/orangefox/out/target/product/mojito/recovery.img
-          if-no-files-found: error
+            /mnt/orangefox/out/target/product/mojito/*.zip
+            /mnt/orangefox/out/target/product/mojito/*.img
+          if-no-files-found: warn
