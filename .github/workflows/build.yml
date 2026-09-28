@@ -10,7 +10,7 @@ jobs:
     
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Cleanup Environment
       run: |
@@ -44,7 +44,7 @@ jobs:
         mka recoveryimage -j$(nproc)
 
     - name: Upload Recovery
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: OrangeFox-Mojito
         path: |
