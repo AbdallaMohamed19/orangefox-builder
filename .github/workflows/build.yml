@@ -31,9 +31,7 @@ jobs:
       GIT_TERMINAL_PROMPT: "0"
 
     steps:
-      - name: Checkout workflow repository
-        uses: actions/checkout@v4
-
+      # ------------------------------------------------------------
       - name: Set device variables
         shell: bash
         run: |
@@ -42,30 +40,19 @@ jobs:
           DEVICE="${{ inputs.device }}"
 
           case "$DEVICE" in
-            sunny)
-              DEVICE_TREE="sunny"
-              LUNCH_TARGET="twrp_sunny-eng"
-              ;;
-            mojito)
-              DEVICE_TREE="mojito"
-              LUNCH_TARGET="twrp_mojito-eng"
-              ;;
-            *)
-              echo "Unsupported device: $DEVICE"
-              exit 1
-              ;;
+            sunny|mojito) ;;
+            *) echo "Unsupported device: $DEVICE"; exit 1 ;;
           esac
 
-          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
-          echo "DEVICE_TREE=$DEVICE_TREE" >> "$GITHUB_ENV"
-          echo "LUNCH_TARGET=$LUNCH_TARGET" >> "$GITHUB_ENV"
-          # Used by OrangeFox build system (persisted for all next steps)
-          echo "FOX_BUILD_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          {
+            echo "DEVICE=$DEVICE"
+            echo "DEVICE_TREE=$DEVICE"
+            echo "FOX_BUILD_DEVICE=$DEVICE"
+          } >> "$GITHUB_ENV"
 
-          echo "Device:        $DEVICE"
-          echo "Device tree:   $DEVICE_TREE"
-          echo "Lunch target:  $LUNCH_TARGET"
+          echo "Device: $DEVICE"
 
+      # ------------------------------------------------------------
       - name: Free disk space
         run: |
           set -eux
@@ -77,11 +64,27 @@ jobs:
           sudo rm -rf /usr/share/swift
           sudo rm -rf /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
-
           sudo apt-get clean
 
           df -h
 
+      # ------------------------------------------------------------
+      - name: Add swap (avoid out-of-memory)
+        run: |
+          set +e
+          sudo swapoff -a
+          sudo rm -f /mnt/swapfile
+          if sudo fallocate -l 12G /mnt/swapfile; then
+            sudo chmod 600 /mnt/swapfile
+            sudo mkswap /mnt/swapfile
+            sudo swapon /mnt/swapfile
+          else
+            echo "Could not create swap, continuing without it."
+          fi
+          free -h
+          exit 0
+
+      # ------------------------------------------------------------
       - name: Install build dependencies
         run: |
           set -eux
@@ -127,12 +130,17 @@ jobs:
             zip \
             zlib1g-dev
 
+      # ------------------------------------------------------------
       - name: Configure git
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@users.noreply.github.com"
           git config --global color.ui false
+          git config --global http.postBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
 
+      # ------------------------------------------------------------
       - name: Install repo
         shell: bash
         run: |
@@ -140,71 +148,93 @@ jobs:
 
           mkdir -p "${HOME}/bin"
 
-          curl -L \
+          curl -L --retry 5 --retry-delay 5 \
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o "${HOME}/bin/repo"
 
           chmod +x "${HOME}/bin/repo"
-
           echo "${HOME}/bin" >> "${GITHUB_PATH}"
 
           "${HOME}/bin/repo" version
 
-      - name: Sync OrangeFox source
+      # ------------------------------------------------------------
+      - name: Sync OrangeFox source (with retries)
         shell: bash
         run: |
-          set -eux
+          set -eu
 
           cd "${HOME}"
+          rm -rf OrangeFox_sync fox_12.1
 
-          rm -rf OrangeFox_sync
-          rm -rf fox_12.1
+          for i in 1 2 3; do
+            git clone --depth=1 https://gitlab.com/OrangeFox/sync.git OrangeFox_sync && break
+            echo "Clone attempt $i failed, retrying..."
+            rm -rf OrangeFox_sync
+            sleep 10
+          done
 
-          git clone --depth=1 \
-            https://gitlab.com/OrangeFox/sync.git \
-            OrangeFox_sync
+          [ -d OrangeFox_sync ] || { echo "ERROR: could not clone sync repo"; exit 1; }
 
-          cd "${HOME}/OrangeFox_sync/sync"
+          # Find the sync script wherever it lives inside the repo
+          SYNC_SCRIPT="$(find "${HOME}/OrangeFox_sync" -name orangefox_sync.sh | head -n1)"
 
-          chmod +x orangefox_sync.sh
+          if [ -z "${SYNC_SCRIPT}" ]; then
+            echo "ERROR: orangefox_sync.sh not found. Repo contents:"
+            ls -laR "${HOME}/OrangeFox_sync" | head -n 50
+            exit 1
+          fi
 
-          ./orangefox_sync.sh \
-            --branch 12.1 \
-            --path "${HOME}/fox_12.1"
+          echo "Using sync script: ${SYNC_SCRIPT}"
+          chmod +x "${SYNC_SCRIPT}"
+          cd "$(dirname "${SYNC_SCRIPT}")"
 
+          OK=0
+          for i in 1 2 3; do
+            echo "=== Sync attempt $i ==="
+            if ./orangefox_sync.sh --branch 12.1 --path "${HOME}/fox_12.1"; then
+              OK=1
+              break
+            fi
+            echo "Sync attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+
+          [ "$OK" = "1" ] || { echo "ERROR: sync failed after 3 attempts"; exit 1; }
+
+          df -h
+
+      # ------------------------------------------------------------
       - name: Sync device tree
         shell: bash
         run: |
-          set -eux
+          set -eu
 
           cd "${HOME}/fox_12.1"
 
           mkdir -p device/xiaomi
-
           rm -rf "device/xiaomi/${DEVICE_TREE}"
 
           echo "Cloning OrangeFox device tree: ${DEVICE_TREE}"
 
-          if ! git clone \
-            --depth=1 \
-            -b "${FOX_BRANCH}" \
-            "https://gitlab.com/OrangeFox/device/${DEVICE_TREE}.git" \
-            "device/xiaomi/${DEVICE_TREE}"; then
+          if ! git clone --depth=1 -b "${FOX_BRANCH}" \
+              "https://gitlab.com/OrangeFox/device/${DEVICE_TREE}.git" \
+              "device/xiaomi/${DEVICE_TREE}"; then
 
-            echo "OrangeFox GitLab device tree not available."
-            echo "Trying GitHub fallback..."
-
+            echo "GitLab tree not available, trying GitHub fallback..."
             rm -rf "device/xiaomi/${DEVICE_TREE}"
 
-            git clone \
-              --depth=1 \
-              -b "${FOX_BRANCH}" \
+            git clone --depth=1 -b "${FOX_BRANCH}" \
               "https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_${DEVICE_TREE}_fox.git" \
-              "device/xiaomi/${DEVICE_TREE}"
+              "device/xiaomi/${DEVICE_TREE}" || {
+                echo "ERROR: could not clone a device tree for ${DEVICE_TREE}."
+                echo "Check the repo name / branch (${FOX_BRANCH}). For mojito try the sunny tree."
+                exit 1
+              }
           fi
 
           ls -la "device/xiaomi/${DEVICE_TREE}"
 
+      # ------------------------------------------------------------
       - name: Validate device tree
         shell: bash
         run: |
@@ -212,27 +242,18 @@ jobs:
 
           DEVICE_PATH="${HOME}/fox_12.1/device/xiaomi/${DEVICE_TREE}"
 
-          echo "Checking device tree: ${DEVICE_PATH}"
-
-          if [ ! -d "$DEVICE_PATH" ]; then
-            echo "ERROR: Device tree does not exist."
-            exit 1
-          fi
-
-          if [ ! -f "$DEVICE_PATH/BoardConfig.mk" ]; then
-            echo "ERROR: BoardConfig.mk not found."
-            exit 1
-          fi
-
-          if [ ! -f "$DEVICE_PATH/AndroidProducts.mk" ]; then
-            echo "ERROR: AndroidProducts.mk not found."
-            exit 1
-          fi
+          for f in BoardConfig.mk AndroidProducts.mk; do
+            if [ ! -f "${DEVICE_PATH}/${f}" ]; then
+              echo "ERROR: ${f} not found in ${DEVICE_PATH}"
+              exit 1
+            fi
+          done
 
           echo "Device tree validation passed."
 
+      # ------------------------------------------------------------
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /home/runner/.ccache
           key: ccache-${{ inputs.device }}-${{ github.run_id }}
@@ -243,55 +264,84 @@ jobs:
         shell: bash
         run: |
           set -eux
-
           mkdir -p "${CCACHE_DIR}"
-
           ccache -M 20G
+          ccache --set-config=compression=true
           ccache -s
 
+      # ------------------------------------------------------------
       - name: Build OrangeFox
         shell: bash
+        timeout-minutes: 300
         run: |
-          # NOTE: no "set -u" here, Android's envsetup.sh/lunch use unset variables
+          # NOTE: no "set -u": Android's envsetup.sh uses unset variables
           set -eo pipefail
 
           cd "${HOME}/fox_12.1"
 
           export FOX_BUILD_DEVICE="${DEVICE}"
 
-          # Sunny / Mojito (Redmi Note 10) are A-only devices with a recovery
-          # partition, so FOX_AB_DEVICE must NOT be set.
-          unset FOX_AB_DEVICE
-
+          set +e
           source build/envsetup.sh
+          set -e
 
-          lunch "${LUNCH_TARGET}"
+          # Try the usual lunch target names
+          LUNCH_OK=""
+          for prefix in twrp omni fox; do
+            TARGET="${prefix}_${DEVICE}-eng"
+            echo "Trying lunch ${TARGET}"
+            if lunch "${TARGET}"; then
+              LUNCH_OK="${TARGET}"
+              break
+            fi
+          done
+
+          [ -n "${LUNCH_OK}" ] || { echo "ERROR: no valid lunch target for ${DEVICE}"; exit 1; }
 
           echo "TARGET_PRODUCT = $(get_build_var TARGET_PRODUCT)"
           echo "TARGET_DEVICE  = $(get_build_var TARGET_DEVICE)"
 
-          mka recoveryimage -j"$(nproc)"
+          # A-only device -> recoveryimage, A/B device -> bootimage
+          DEVICE_PATH="device/xiaomi/${DEVICE_TREE}"
+          if grep -rEqs "^\s*(export\s+)?(FOX_AB_DEVICE|AB_OTA_UPDATER)\s*:?=\s*(1|true)" "${DEVICE_PATH}"; then
+            MAKE_TARGET="bootimage"
+          else
+            MAKE_TARGET="recoveryimage"
+          fi
+          echo "Building target: ${MAKE_TARGET}"
 
+          df -h
+          free -h
+
+          mka "${MAKE_TARGET}" -j"$(nproc)" 2>&1 | tee "${HOME}/build.log"
+
+      # ------------------------------------------------------------
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.device }}-${{ github.run_id }}
+
+      # ------------------------------------------------------------
       - name: Show build output
         if: always()
         shell: bash
         run: |
           set +e
-
           PRODUCT_OUT="${HOME}/fox_12.1/out/target/product/${DEVICE}"
 
           if [ -d "${PRODUCT_OUT}" ]; then
             ls -lah "${PRODUCT_OUT}"
-            echo
             echo "Images:"
             find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.img" -print
-            echo
             echo "ZIPs:"
             find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.zip" -print
           else
             echo "Product output directory does not exist."
           fi
 
+      # ------------------------------------------------------------
       - name: Upload OrangeFox
         if: success()
         uses: actions/upload-artifact@v4
@@ -301,7 +351,16 @@ jobs:
           compression-level: 9
           path: |
             /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/recovery.img
+            /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/boot.img
             /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/OrangeFox*.zip
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log-${{ inputs.device }}
+          if-no-files-found: ignore
+          path: /home/runner/build.log
 
       - name: Ccache statistics
         if: always()
