@@ -42,12 +42,14 @@ jobs:
           
           cd /mnt/orangefox
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
+          
+          # حذف vendorsetup لضمان عدم توقف البناء
+          rm -f device/xiaomi/mojito/vendorsetup.sh
 
       - name: Build OrangeFox Recovery
         run: |
           cd /mnt/orangefox
           
-          # متغيرات OrangeFox المطلوبة لمنع خطأ الإصدار
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
@@ -55,11 +57,10 @@ jobs:
           export FOX_BUILD_TYPE="Unofficial"
           export FOX_MAINTAINER_PATCH_VERSION="0"
           export OF_MAINTAINER="Abdalla"
-          
-          [ -f device/xiaomi/mojito/vendorsetup.sh ] && source device/xiaomi/mojito/vendorsetup.sh || true
+          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch fox_mojito-eng || true
+          lunch twrp_mojito-eng
           
           mka recoveryimage -j$(nproc)
 
