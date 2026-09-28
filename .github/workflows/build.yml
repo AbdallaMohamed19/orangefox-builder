@@ -34,7 +34,7 @@ jobs:
           cd /mnt/orangefox
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
-          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
+          repo init -u https://github.com/OrangeFoxRecovery/manifest.git -b fox_12.1 --depth=1
           repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
           git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito.git -b fox_12.1 device/xiaomi/mojito
 
