@@ -39,6 +39,7 @@ jobs:
           repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
           repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
           
+          # جلب شجرة الجهاز لموقعها الصحيح
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
 
       - name: Build OrangeFox
@@ -50,6 +51,8 @@ jobs:
           export LC_ALL="C"
           
           source build/envsetup.sh
+          
+          # اختيار هدف البناء المتوافق مع mojito
           lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng
           
           mka recoveryimage -j$(nproc)
