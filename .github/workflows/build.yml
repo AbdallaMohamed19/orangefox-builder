@@ -49,8 +49,8 @@ jobs:
         name: OrangeFox-Mojito
         path: |
           fox/out/target/product/mojito/OrangeFox-*.zip
-          fox/out/target/product/mojito/recovery.img
-- name: Maximize build space
+         fox/out/target/product/mojito/recovery.img
+    - name: Maximize build space
   uses: easimon/maximize-build-space@master
   with:
     remove-dotnet: 'true'
