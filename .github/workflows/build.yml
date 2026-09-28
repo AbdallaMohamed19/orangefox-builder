@@ -53,11 +53,12 @@ jobs:
           export LC_ALL="C"
           export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
           
-          # تهيئة البيئة والهدف
           source build/envsetup.sh
-          lunch twrp_mojito-userdebug || lunch fox_mojito-userdebug || lunch omni_mojito-userdebug
           
-          # البدء في التجميع الفعلي
+          # تجربة الأهداف بشكل منفصل لضمان النجاح
+          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch twrp_mojito-userdebug || true
+          
+          # التجميع الفعلي
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
