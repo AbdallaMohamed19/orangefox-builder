@@ -1,4 +1,5 @@
 name: Build OrangeFox 12.1 - mojito
+git ls-remote --heads https://gitlab.com/OrangeFox/Manifest.git
 
 on:
   workflow_dispatch:
