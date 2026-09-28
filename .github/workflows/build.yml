@@ -1,82 +1,73 @@
-name: Build OrangeFox Mojito
+name: Build OrangeFox Final
 
 on:
   workflow_dispatch:
 
-env:
-  DEVICE_TREE: https://gitlab.com/OrangeFox/device/mojito.git
-  DEVICE_BRANCH: ""
-  DEVICE_PATH: device/xiaomi/mojito
-  FOX_BRANCH: "12.1"
-  TARGET: twrp_mojito-eng
-
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: true
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          swap-storage: true
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Setup Large Partition Permissions
         run: |
-          sudo apt update
-          sudo apt install -y git aria2 curl python3 python-is-python3 bc bison \
-            build-essential ccache flex g++-multilib gcc-multilib libncurses5 \
-            libssl-dev libxml2-utils lz4 zip unzip zlib1g-dev rsync xsltproc \
-            openjdk-11-jdk repo
+          sudo mkdir -p /mnt/orangefox
+          sudo chown -R $USER:$USER /mnt
+          sudo chmod -R 777 /mnt
 
-      - name: Git config
+      - name: Set up Build Environment
         run: |
-          git config --global user.name "builder"
-          git config --global user.email "builder@example.com"
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
 
-      - name: Sync OrangeFox sources
+      - name: Install Repo
         run: |
-          mkdir -p ~/fox
-          git clone https://gitlab.com/OrangeFox/sync.git ~/sync
-          cd ~/sync
-          ./orangefox_sync.sh --branch $FOX_BRANCH --path ~/fox
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Clone device tree
+      - name: Sync OrangeFox Source via Official Script
         run: |
-          if [ -n "$DEVICE_BRANCH" ]; then
-            git clone $DEVICE_TREE -b $DEVICE_BRANCH ~/fox/$DEVICE_PATH
-          else
-            git clone $DEVICE_TREE ~/fox/$DEVICE_PATH
-          fi
+          git config --global user.name "AbdallaMohamed19"
+          git config --global user.email "abdalla@example.com"
+          
+          cd /mnt
+          rm -rf sync
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox || true
+          
+          cd /mnt/orangefox
+          git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
 
-      - name: Fix obsolete FOX_VERSION
+      - name: Build OrangeFox Recovery
         run: |
-          cd ~/fox/$DEVICE_PATH
-          echo "--- before ---"
-          grep -rn "FOX_VERSION" . --exclude-dir=.git || true
-          grep -rl "FOX_VERSION" . --exclude-dir=.git | xargs -r sed -i 's/\bFOX_VERSION\b/FOX_MAINTAINER_PATCH_VERSION/g'
-          echo "--- after ---"
-          grep -rn "FOX_MAINTAINER_PATCH_VERSION" . --exclude-dir=.git || true
-
-      - name: Build
-        run: |
-          cd ~/fox
-          set +e
-          source build/envsetup.sh
-          set -e
+          cd /mnt/orangefox
+          
+          # متغيرات OrangeFox المطلوبة لمنع خطأ الإصدار
           export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL="C"
           export FOX_BUILD_DEVICE=mojito
-          lunch $TARGET
-          mka adbd recoveryimage -j$(nproc --all)
+          export LC_ALL="C"
+          export FOX_VERSION="R11.1"
+          export FOX_BUILD_TYPE="Unofficial"
+          export FOX_MAINTAINER_PATCH_VERSION="0"
+          export OF_MAINTAINER="Abdalla"
+          
+          [ -f device/xiaomi/mojito/vendorsetup.sh ] && source device/xiaomi/mojito/vendorsetup.sh || true
+          
+          source build/envsetup.sh
+          lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch fox_mojito-eng || true
+          
+          mka recoveryimage -j$(nproc)
 
-      - name: Upload recovery
+      - name: Upload Recovery
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox-mojito
+          name: OrangeFox_Mojito_Recovery_Full
           path: |
-            ~/fox/out/target/product/mojito/OrangeFox*.zip
-            ~/fox/out/target/product/mojito/recovery.img
+            /mnt/orangefox/out/target/product/mojito/*.zip
+            /mnt/orangefox/out/target/product/mojito/*.img
+          if-no-files-found: warn
