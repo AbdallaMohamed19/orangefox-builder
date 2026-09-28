@@ -1,75 +1,310 @@
-name: Build OrangeFox Final
+name: Build OrangeFox - Sunny / Mojito
 
 on:
   workflow_dispatch:
+    inputs:
+      device:
+        description: "Select device"
+        required: true
+        type: choice
+        options:
+          - sunny
+          - mojito
+        default: sunny
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    timeout-minutes: 360
+
+    env:
+      FOX_BRANCH: fox_12.1
+      FOX_VERSION: R11.1
+      FOX_BUILD_TYPE: Unofficial
+      FOX_MAINTAINER_PATCH_VERSION: "0"
+      OF_MAINTAINER: Abdalla
+      LC_ALL: C
+      ALLOW_MISSING_DEPENDENCIES: "true"
+      USE_CCACHE: "1"
+      CCACHE_EXEC: /usr/bin/ccache
+      CCACHE_DIR: /home/runner/.ccache
+      GIT_TERMINAL_PROMPT: "0"
 
     steps:
-      - name: Checkout
+      - name: Checkout workflow repository
         uses: actions/checkout@v4
 
-      - name: Free Disk Space
+      - name: Set device variables
+        shell: bash
         run: |
+          set -e
+
+          DEVICE="${{ inputs.device }}"
+
+          case "$DEVICE" in
+            sunny)
+              DEVICE_TREE="sunny"
+              LUNCH_TARGET="twrp_sunny-eng"
+              ;;
+            mojito)
+              DEVICE_TREE="mojito"
+              LUNCH_TARGET="twrp_mojito-eng"
+              ;;
+            *)
+              echo "Unsupported device: $DEVICE"
+              exit 1
+              ;;
+          esac
+
+          echo "DEVICE=$DEVICE" >> "$GITHUB_ENV"
+          echo "DEVICE_TREE=$DEVICE_TREE" >> "$GITHUB_ENV"
+          echo "LUNCH_TARGET=$LUNCH_TARGET" >> "$GITHUB_ENV"
+          # Used by OrangeFox build system (persisted for all next steps)
+          echo "FOX_BUILD_DEVICE=$DEVICE" >> "$GITHUB_ENV"
+
+          echo "Device:        $DEVICE"
+          echo "Device tree:   $DEVICE_TREE"
+          echo "Lunch target:  $LUNCH_TARGET"
+
+      - name: Free disk space
+        run: |
+          set -eux
+
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /opt/ghc
-          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+
           sudo apt-get clean
+
           df -h
 
-      - name: Set up Build Environment
+      - name: Install build dependencies
         run: |
+          set -eux
+
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
 
-      - name: Install Repo
-        run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
+          sudo apt-get install -y \
+            adb \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            fontconfig \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            gnupg \
+            gperf \
+            lib32ncurses-dev \
+            lib32z1-dev \
+            libc6-dev-i386 \
+            libgl1-mesa-dev \
+            liblz4-tool \
+            libncurses5 \
+            libncurses5-dev \
+            libssl-dev \
+            libx11-dev \
+            libxml2 \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            python3 \
+            python-is-python3 \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            unzip \
+            x11proto-core-dev \
+            xsltproc \
+            xz-utils \
+            zip \
+            zlib1g-dev
 
-      - name: Sync OrangeFox Source
+      - name: Configure git
         run: |
-          git config --global user.name "AbdallaMohamed19"
-          git config --global user.email "abdalla@example.com"
-          
-          mkdir -p ~/fox_12.1
-          cd ~/fox_12.1
-          
-          repo init --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1
-          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc) || repo sync -c -j4
-          
-          git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
-          
-          rm -f device/xiaomi/mojito/vendorsetup.sh
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@users.noreply.github.com"
+          git config --global color.ui false
 
-      - name: Build OrangeFox Recovery
+      - name: Install repo
+        shell: bash
         run: |
-          cd ~/fox_12.1
-          
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export FOX_BUILD_DEVICE=mojito
-          export LC_ALL="C"
-          export FOX_VERSION="R11.1"
-          export FOX_BUILD_TYPE="Unofficial"
-          export FOX_MAINTAINER_PATCH_VERSION="0"
-          export OF_MAINTAINER="Abdalla"
-          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-          
+          set -eux
+
+          mkdir -p "${HOME}/bin"
+
+          curl -L \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "${HOME}/bin/repo"
+
+          chmod +x "${HOME}/bin/repo"
+
+          echo "${HOME}/bin" >> "${GITHUB_PATH}"
+
+          "${HOME}/bin/repo" version
+
+      - name: Sync OrangeFox source
+        shell: bash
+        run: |
+          set -eux
+
+          cd "${HOME}"
+
+          rm -rf OrangeFox_sync
+          rm -rf fox_12.1
+
+          git clone --depth=1 \
+            https://gitlab.com/OrangeFox/sync.git \
+            OrangeFox_sync
+
+          cd "${HOME}/OrangeFox_sync/sync"
+
+          chmod +x orangefox_sync.sh
+
+          ./orangefox_sync.sh \
+            --branch 12.1 \
+            --path "${HOME}/fox_12.1"
+
+      - name: Sync device tree
+        shell: bash
+        run: |
+          set -eux
+
+          cd "${HOME}/fox_12.1"
+
+          mkdir -p device/xiaomi
+
+          rm -rf "device/xiaomi/${DEVICE_TREE}"
+
+          echo "Cloning OrangeFox device tree: ${DEVICE_TREE}"
+
+          if ! git clone \
+            --depth=1 \
+            -b "${FOX_BRANCH}" \
+            "https://gitlab.com/OrangeFox/device/${DEVICE_TREE}.git" \
+            "device/xiaomi/${DEVICE_TREE}"; then
+
+            echo "OrangeFox GitLab device tree not available."
+            echo "Trying GitHub fallback..."
+
+            rm -rf "device/xiaomi/${DEVICE_TREE}"
+
+            git clone \
+              --depth=1 \
+              -b "${FOX_BRANCH}" \
+              "https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_${DEVICE_TREE}_fox.git" \
+              "device/xiaomi/${DEVICE_TREE}"
+          fi
+
+          ls -la "device/xiaomi/${DEVICE_TREE}"
+
+      - name: Validate device tree
+        shell: bash
+        run: |
+          set -e
+
+          DEVICE_PATH="${HOME}/fox_12.1/device/xiaomi/${DEVICE_TREE}"
+
+          echo "Checking device tree: ${DEVICE_PATH}"
+
+          if [ ! -d "$DEVICE_PATH" ]; then
+            echo "ERROR: Device tree does not exist."
+            exit 1
+          fi
+
+          if [ ! -f "$DEVICE_PATH/BoardConfig.mk" ]; then
+            echo "ERROR: BoardConfig.mk not found."
+            exit 1
+          fi
+
+          if [ ! -f "$DEVICE_PATH/AndroidProducts.mk" ]; then
+            echo "ERROR: AndroidProducts.mk not found."
+            exit 1
+          fi
+
+          echo "Device tree validation passed."
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ inputs.device }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ inputs.device }}-
+
+      - name: Configure ccache
+        shell: bash
+        run: |
+          set -eux
+
+          mkdir -p "${CCACHE_DIR}"
+
+          ccache -M 20G
+          ccache -s
+
+      - name: Build OrangeFox
+        shell: bash
+        run: |
+          # NOTE: no "set -u" here, Android's envsetup.sh/lunch use unset variables
+          set -eo pipefail
+
+          cd "${HOME}/fox_12.1"
+
+          export FOX_BUILD_DEVICE="${DEVICE}"
+
+          # Sunny / Mojito (Redmi Note 10) are A-only devices with a recovery
+          # partition, so FOX_AB_DEVICE must NOT be set.
+          unset FOX_AB_DEVICE
+
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch fox_mojito-eng
-          
-          mka recoveryimage -j$(nproc)
 
-      - name: Upload Recovery
+          lunch "${LUNCH_TARGET}"
+
+          echo "TARGET_PRODUCT = $(get_build_var TARGET_PRODUCT)"
+          echo "TARGET_DEVICE  = $(get_build_var TARGET_DEVICE)"
+
+          mka recoveryimage -j"$(nproc)"
+
+      - name: Show build output
+        if: always()
+        shell: bash
+        run: |
+          set +e
+
+          PRODUCT_OUT="${HOME}/fox_12.1/out/target/product/${DEVICE}"
+
+          if [ -d "${PRODUCT_OUT}" ]; then
+            ls -lah "${PRODUCT_OUT}"
+            echo
+            echo "Images:"
+            find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.img" -print
+            echo
+            echo "ZIPs:"
+            find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.zip" -print
+          else
+            echo "Product output directory does not exist."
+          fi
+
+      - name: Upload OrangeFox
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox_Mojito_Recovery_Full
+          name: OrangeFox-${{ inputs.device }}-fox12.1
+          if-no-files-found: error
+          compression-level: 9
           path: |
-            ~/fox_12.1/out/target/product/mojito/*.zip
-            ~/fox_12.1/out/target/product/mojito/*.img
-          if-no-files-found: warn
+            /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/recovery.img
+            /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/OrangeFox*.zip
+
+      - name: Ccache statistics
+        if: always()
+        shell: bash
+        run: |
+          ccache -s || true
