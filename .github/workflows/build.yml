@@ -11,16 +11,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Free Disk Space (Hard Cleanup)
+      - name: Create Build Directory on Large Partition
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/share/boost
-          sudo docker image prune -a -f || true
-          sudo apt-get clean
-          df -h
+          sudo mkdir -p /mnt/orangefox
+          sudo chown -R $USER:$USER /mnt/orangefox
 
       - name: Set up Build Environment
         run: |
@@ -37,8 +31,7 @@ jobs:
       - name: Sync OrangeFox Source & Device Tree
         run: |
           set -e
-          mkdir -p ~/orangefox
-          cd ~/orangefox
+          cd /mnt/orangefox
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
@@ -48,7 +41,7 @@ jobs:
       - name: Build OrangeFox
         run: |
           set -e
-          cd ~/orangefox
+          cd /mnt/orangefox
           source build/envsetup.sh
           export ALLOW_MISSING_DEPENDENCIES=true
           lunch twrp_mojito-eng || lunch omni_mojito-eng
@@ -59,5 +52,5 @@ jobs:
         with:
           name: OrangeFox_Mojito_Recovery
           path: |
-            ~/orangefox/out/target/product/mojito/*.img
-            ~/orangefox/out/target/product/mojito/*.zip
+            /mnt/orangefox/out/target/product/mojito/*.img
+            /mnt/orangefox/out/target/product/mojito/*.zip
