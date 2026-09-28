@@ -29,17 +29,22 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync OrangeFox Source Directly
+      - name: Sync OrangeFox Source via Official Script Correctly
         run: |
           set -e
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
+          git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
           
+          # استنساخ سكربت التزامن والتشغيل من داخله مباشرة لمنع خطأ الباتش المفقود
+          cd /mnt
+          rm -rf sync
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
+          
+          # جلب شجرة الجهاز
           cd /mnt/orangefox
-          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
-          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
-          
-          # جلب شجرة الجهاز لموقعها الصحيح
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
 
       - name: Build OrangeFox
@@ -51,9 +56,7 @@ jobs:
           export LC_ALL="C"
           
           source build/envsetup.sh
-          
-          # اختيار هدف البناء المتوافق مع mojito
-          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng
+          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           
           mka recoveryimage -j$(nproc)
 
