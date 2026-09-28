@@ -38,28 +38,29 @@ jobs:
           rm -rf sync
           git clone https://gitlab.com/OrangeFox/sync.git
           cd sync
-          
-          # تشغيل السكربت وتجاوز خطأ الباتش البسيط لكي يستمر التنزيل كاملاً
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox || true
           
           cd /mnt/orangefox
-          # تنزيل شجرة الجهاز
+          # تنزيل شجرة الجهاز وشجرة الهواوي/شيومي المشتركة
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
           
-          # حذف الملف المعطوب المسبب لخروج البناء
+          # حذف ملف التهيئة المعطوب
           rm -f device/xiaomi/mojito/vendorsetup.sh
 
       - name: Build OrangeFox
         run: |
-          set -e
           cd /mnt/orangefox
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
+          # إعداد البيئة واختيار الهدف الصحيح لأورانج فوكس
+          set +e
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug || lunch fox_mojito-userdebug
+          lunch twrp_mojito-userdebug
+          set -e
           
+          # بدء البناء
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
