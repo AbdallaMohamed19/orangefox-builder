@@ -35,9 +35,11 @@ jobs:
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           
-          # تشغيل السكربت من مجلده الأصلي لتجنب خطأ missing diff file
-          git clone https://gitlab.com/OrangeFox/sync.git /mnt/sync
-          cd /mnt/sync
+          # استكشاف المجلد وتشغيل السكربت من داخل مستودعه المباشر
+          cd /mnt
+          rm -rf sync
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
           
           cd /mnt/orangefox
@@ -51,9 +53,10 @@ jobs:
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
-          source build/envsetup.sh
+          # إزالة ملف vendorsetup المسبب للتوقف قبل إعداد البيئة
+          rm -f device/xiaomi/mojito/vendorsetup.sh
           
-          # تنفيذ الغرض من vendorsetup ثم استخدام أهداف lunch المتوافقة
+          source build/envsetup.sh
           lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           
           mka recoveryimage -j$(nproc)
