@@ -1,4 +1,3 @@
-
 name: Build OrangeFox Final
 
 on:
@@ -36,9 +35,9 @@ jobs:
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           
-          cd /mnt
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
+          # تشغيل السكربت من مجلده الأصلي لتجنب خطأ missing diff file
+          git clone https://gitlab.com/OrangeFox/sync.git /mnt/sync
+          cd /mnt/sync
           ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
           
           cd /mnt/orangefox
@@ -54,8 +53,8 @@ jobs:
           
           source build/envsetup.sh
           
-          # تجربة أهداف البناء المتوافقة مع OrangeFox بالترتيب
-          lunch fox_mojito-eng || lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
+          # تنفيذ الغرض من vendorsetup ثم استخدام أهداف lunch المتوافقة
+          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
           
           mka recoveryimage -j$(nproc)
 
