@@ -29,20 +29,16 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync OrangeFox Source via Official Script
+      - name: Sync OrangeFox Source Directly
         run: |
           set -e
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           
-          # استكشاف المجلد وتشغيل السكربت من داخل مستودعه المباشر
-          cd /mnt
-          rm -rf sync
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
-          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
-          
           cd /mnt/orangefox
+          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
+          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
+          
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
 
       - name: Build OrangeFox
@@ -53,11 +49,8 @@ jobs:
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
-          # إزالة ملف vendorsetup المسبب للتوقف قبل إعداد البيئة
-          rm -f device/xiaomi/mojito/vendorsetup.sh
-          
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
+          lunch twrp_mojito-eng || lunch fox_mojito-eng || lunch omni_mojito-eng
           
           mka recoveryimage -j$(nproc)
 
