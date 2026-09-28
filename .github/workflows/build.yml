@@ -15,6 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+
       - name: Free disk space
         run: |
           set -euxo pipefail
@@ -23,9 +24,11 @@ jobs:
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /opt/hostedtoolcache
+
           sudo docker system prune -af || true
 
           df -h
+
 
       - name: Install dependencies
         run: |
@@ -73,35 +76,45 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
 
+
       - name: Install repo
         run: |
           set -euxo pipefail
 
           mkdir -p "$HOME/bin"
 
-          curl -L https://storage.googleapis.com/git-repo-downloads/repo \
+          curl -L \
+            https://storage.googleapis.com/git-repo-downloads/repo \
             -o "$HOME/bin/repo"
 
           chmod +x "$HOME/bin/repo"
 
           echo "$HOME/bin" >> "$GITHUB_PATH"
 
-      - name: Download OrangeFox sync
+
+      - name: Download OrangeFox sync script
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE"
+          mkdir -p "$GITHUB_WORKSPACE/OrangeFox_sync"
 
-          rm -rf OrangeFox_sync
+          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
 
-          git clone \
-            --depth=1 \
-            https://gitlab.com/OrangeFox/sync.git \
-            OrangeFox_sync
+          curl -L \
+            https://gitlab.com/OrangeFox/sync/-/raw/master/orangefox_sync.sh \
+            -o orangefox_sync.sh
 
-          test -f OrangeFox_sync/sync/orangefox_sync.sh
+          chmod +x orangefox_sync.sh
 
-          chmod +x OrangeFox_sync/sync/orangefox_sync.sh
+          test -s orangefox_sync.sh
+
+          echo "OrangeFox sync script downloaded:"
+          ls -lh orangefox_sync.sh
+
+          echo ""
+          echo "Script help:"
+          ./orangefox_sync.sh --help || true
+
 
       - name: Sync OrangeFox 12.1
         run: |
@@ -109,11 +122,38 @@ jobs:
 
           rm -rf "$FOX_PATH"
 
-          cd "$GITHUB_WORKSPACE/OrangeFox_sync/sync"
+          mkdir -p "$FOX_PATH"
+
+          cd "$GITHUB_WORKSPACE/OrangeFox_sync"
+
+          echo "============================================"
+          echo "SYNCING ORANGEFOX 12.1"
+          echo "============================================"
 
           ./orangefox_sync.sh \
             --branch 12.1 \
             --path "$FOX_PATH"
+
+
+      - name: Verify OrangeFox source
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "============================================"
+          echo "VERIFY ORANGEFOX SOURCE"
+          echo "============================================"
+
+          test -d .repo
+          test -f build/envsetup.sh
+
+          echo "OrangeFox source is ready."
+
+          echo ""
+          echo "FOX_PATH:"
+          pwd
+
 
       - name: Clone mojito device tree
         run: |
@@ -131,7 +171,12 @@ jobs:
             https://github.com/TeamWin/android_device_xiaomi_mojito.git \
             device/xiaomi/mojito
 
-      - name: Clone common device tree
+          test -f device/xiaomi/mojito/BoardConfig.mk
+
+          echo "Mojito device tree OK."
+
+
+      - name: Clone SM6150 common tree
         run: |
           set -euxo pipefail
 
@@ -147,7 +192,10 @@ jobs:
             https://github.com/TeamWin/android_device_xiaomi_sm6150-common.git \
             device/xiaomi/sm6150-common
 
-      - name: Clone kernel
+          echo "SM6150 common tree OK."
+
+
+      - name: Clone mojito kernel
         run: |
           set -euxo pipefail
 
@@ -162,18 +210,36 @@ jobs:
             https://github.com/nebrassy/android_kernel_xiaomi_mojito.git \
             kernel/xiaomi/mojito
 
-      - name: Check source
+          test -f kernel/xiaomi/mojito/Makefile
+
+          echo "Mojito kernel OK."
+
+
+      - name: Check device tree
         run: |
           set -euxo pipefail
 
           cd "$FOX_PATH"
 
-          test -f build/envsetup.sh
-          test -f device/xiaomi/mojito/BoardConfig.mk
-          test -f device/xiaomi/mojito/AndroidProducts.mk
-          test -f kernel/xiaomi/mojito/Makefile
+          echo "============================================"
+          echo "DEVICE TREE"
+          echo "============================================"
 
-          echo "Source check passed."
+          find device/xiaomi/mojito \
+            -maxdepth 2 \
+            -type f \
+            -print | sort | head -100
+
+          echo ""
+          echo "============================================"
+          echo "COMMON TREE"
+          echo "============================================"
+
+          find device/xiaomi/sm6150-common \
+            -maxdepth 2 \
+            -type f \
+            -print | sort | head -100
+
 
       - name: Setup Android environment
         shell: bash
@@ -189,27 +255,48 @@ jobs:
           echo "LOADING ENVIRONMENT"
           echo "============================================"
 
-          set +e
+          unset TOP
+          unset OUT
+
           source build/envsetup.sh
+
           STATUS=$?
-          set -e
 
           echo ""
           echo "envsetup status: $STATUS"
 
-          echo "TOP=${TOP:-}"
-          echo "OUT=${OUT:-}"
-          echo "OUT_DIR=${OUT_DIR:-}"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "envsetup failed"
+            exit "$STATUS"
+          fi
 
-          echo ""
-          echo "============================================"
-          echo "TESTING LUNCH"
-          echo "============================================"
+
+      - name: Lunch mojito
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+
+          unset TOP
+          unset OUT
+
+          source build/envsetup.sh
 
           lunch twrp_mojito-eng
 
           echo ""
-          echo "Lunch completed."
+          echo "============================================"
+          echo "LUNCH RESULT"
+          echo "============================================"
+
+          echo "TARGET_PRODUCT=${TARGET_PRODUCT:-}"
+          echo "TARGET_DEVICE=${TARGET_DEVICE:-}"
+          echo "TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT:-}"
+
 
       - name: Build OrangeFox
         shell: bash
@@ -221,30 +308,20 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           export LC_ALL=C
 
-          echo "============================================"
-          echo "LOADING ENVIRONMENT"
-          echo "============================================"
+          unset TOP
+          unset OUT
 
-          set +e
           source build/envsetup.sh
-          STATUS=$?
-          set -e
-
-          echo "envsetup status: $STATUS"
-
-          echo ""
-          echo "============================================"
-          echo "LUNCH"
-          echo "============================================"
 
           lunch twrp_mojito-eng
 
           echo ""
           echo "============================================"
-          echo "BUILD"
+          echo "BUILDING RECOVERY"
           echo "============================================"
 
           mka recoveryimage
+
 
       - name: Show build outputs
         if: always()
@@ -255,7 +332,7 @@ jobs:
           cd "$FOX_PATH"
 
           echo "============================================"
-          echo "TARGET DIRECTORY"
+          echo "TARGET PRODUCT"
           echo "============================================"
 
           ls -lah out/target/product/mojito 2>/dev/null || true
@@ -265,13 +342,10 @@ jobs:
           echo "RECOVERY DIRECTORY"
           echo "============================================"
 
-          if [ -d out/target/product/mojito/recovery ]; then
-            find out/target/product/mojito/recovery \
-              -type f \
-              -print
-          else
-            echo "No recovery directory."
-          fi
+          find out/target/product/mojito/recovery \
+            -type f \
+            -print \
+            2>/dev/null || true
 
           echo ""
           echo "============================================"
@@ -302,11 +376,16 @@ jobs:
 
           find out \
             -type f \
-            \( -iname '*recovery*' -o -iname '*orangefox*' \) \
+            \( \
+              -iname '*recovery*' \
+              -o \
+              -iname '*orangefox*' \
+            \) \
             -print \
             2>/dev/null || true
 
-      - name: Upload build artifacts
+
+      - name: Upload OrangeFox artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
