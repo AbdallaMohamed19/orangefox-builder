@@ -1,3 +1,4 @@
+
 name: Build OrangeFox Final
 
 on:
@@ -51,11 +52,11 @@ jobs:
           export FOX_BUILD_DEVICE=mojito
           export LC_ALL="C"
           
-          # إزالة أو تعطيل vendorsetup.sh لمنع توقف البيئة
-          rm -f device/xiaomi/mojito/vendorsetup.sh
-          
           source build/envsetup.sh
-          lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
+          
+          # تجربة أهداف البناء المتوافقة مع OrangeFox بالترتيب
+          lunch fox_mojito-eng || lunch twrp_mojito-eng || lunch omni_mojito-eng || lunch twrp_mojito-userdebug
+          
           mka recoveryimage -j$(nproc)
 
       - name: Upload Recovery
