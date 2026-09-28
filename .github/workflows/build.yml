@@ -29,22 +29,25 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync OrangeFox Source
+      - name: Sync OrangeFox Source Directly
         run: |
           set -e
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
           git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
           
-          cd /mnt
-          rm -rf sync
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
-          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
-          
+          # المزامنة المباشرة لمنع أخطاء السكربت
           cd /mnt/orangefox
+          repo init -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1 --depth=1
+          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune -j$(nproc)
+          
+          # جلب OrangeFox Vendor و Recovery يدويًا لضمان وجود الملفات
+          git clone https://gitlab.com/OrangeFox/vendor/recovery.git -b fox_12.1 vendor/fox || true
+          
+          # تنزيل شجرة الجهاز
           git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
           
+          # تنظيف الملفات المعطوبة
           rm -f device/xiaomi/mojito/vendorsetup.sh
 
       - name: Build OrangeFox
