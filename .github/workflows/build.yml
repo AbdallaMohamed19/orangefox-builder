@@ -3,9 +3,9 @@ name: Build OrangeFox Mojito
 on:
   workflow_dispatch:
 
-env:
-  DEVICE_TREE: https://github.com/USERNAME/REPO.git
-  DEVICE_BRANCH: fox_12.1
+env:env:
+  DEVICE_TREE: https://gitlab.com/OrangeFox/device/mojito.git
+  DEVICE_BRANCH: master
   DEVICE_PATH: device/xiaomi/mojito
   FOX_BRANCH: "12.1"
   TARGET: twrp_mojito-eng
