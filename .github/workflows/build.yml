@@ -28,15 +28,20 @@ jobs:
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Sync OrangeFox Source & Device Tree
+      - name: Sync OrangeFox Source via Official Script
         run: |
           set -e
-          cd /mnt/orangefox
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
-          git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
-          repo init --no-repo-verify --depth=1 -u https://gitlab.com/OrangeFox/Manifest.git -b fox_12.1
-          repo sync -c --no-clone-bundle --no-tags --optimized-fetch --prune --force-sync -j$(nproc)
+          
+          # استخدام السكربت الرسمي المخصص للمزامنة
+          cd /mnt
+          git clone https://gitlab.com/OrangeFox/sync.git
+          cd sync
+          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox
+          
+          # سحب شجرة الجهاز الخاصة بـ mojito
+          cd /mnt/orangefox
           git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito.git -b fox_12.1 device/xiaomi/mojito
 
       - name: Build OrangeFox
