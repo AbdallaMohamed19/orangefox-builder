@@ -8,63 +8,161 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Large Partition Permissions
         run: |
           sudo mkdir -p /mnt/orangefox
-          sudo chown -R $USER:$USER /mnt
+          sudo chown -R "$USER:$USER" /mnt
           sudo chmod -R 777 /mnt
 
       - name: Set up Build Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32z1-dev liblz4-tool libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 python-is-python3
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            git \
+            gnupg \
+            gperf \
+            lib32ncurses5-dev \
+            lib32z1-dev \
+            liblz4-tool \
+            libncurses5-dev \
+            libsdl1.2-dev \
+            libssl-dev \
+            libxml2 \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            xsltproc \
+            zip \
+            zlib1g-dev \
+            python3 \
+            python-is-python3
 
       - name: Install Repo
         run: |
-          mkdir -p ~/bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
+          mkdir -p "$HOME/bin"
 
-      - name: Sync OrangeFox Source via Official Script
+          curl -L \
+            https://storage.googleapis.com/git-repo-downloads/repo \
+            -o "$HOME/bin/repo"
+
+          chmod a+x "$HOME/bin/repo"
+
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Sync OrangeFox Source
         run: |
+          set -euxo pipefail
+
           git config --global user.name "AbdallaMohamed19"
           git config --global user.email "abdalla@example.com"
-          
+
           cd /mnt
-          rm -rf sync
-          git clone https://gitlab.com/OrangeFox/sync.git
-          cd sync
-          ./orangefox_sync.sh --branch 12.1 --path /mnt/orangefox || true
-          
+
+          rm -rf /mnt/sync
+          rm -rf /mnt/orangefox
+
+          git clone https://gitlab.com/OrangeFox/sync.git /mnt/sync
+
+          cd /mnt/sync
+
+          ./orangefox_sync.sh \
+            --branch 12.1 \
+            --path /mnt/orangefox
+
+      - name: Add Mojito Device Tree
+        run: |
+          set -euxo pipefail
+
           cd /mnt/orangefox
-          git clone https://gitlab.com/OrangeFox/device/mojito.git -b fox_12.1 device/xiaomi/mojito || git clone https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_mojito_fox.git -b fox_12.1 device/xiaomi/mojito
-          
-          # حذف vendorsetup لضمان عدم توقف البناء
-          rm -f device/xiaomi/mojito/vendorsetup.sh
+
+          git clone \
+            --depth=1 \
+            -b fox_12.1 \
+            https://gitlab.com/OrangeFox/device/mojito.git \
+            device/xiaomi/mojito
+
+          test -f device/xiaomi/mojito/AndroidProducts.mk
+
+          echo "===== Device tree ====="
+          ls -la device/xiaomi/mojito
+
+          echo "===== vendorsetup.sh ====="
+          test -f device/xiaomi/mojito/vendorsetup.sh
+          sed -n '1,240p' device/xiaomi/mojito/vendorsetup.sh
+
+      - name: Prepare Build Environment
+        run: |
+          set -euxo pipefail
+
+          cd /mnt/orangefox
+
+          export FOX_BUILD_DEVICE=mojito
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+
+          export FOX_BUILD_TYPE=Unofficial
+          export FOX_MAINTAINER_PATCH_VERSION=0
+          export OF_MAINTAINER=Abdalla
+
+          # لا نحذف vendorsetup.sh
+          source build/envsetup.sh
+
+          echo "===== Checking lunch targets ====="
+          lunch twrp_mojito-eng
 
       - name: Build OrangeFox Recovery
         run: |
+          set -euxo pipefail
+
           cd /mnt/orangefox
-          
-          export ALLOW_MISSING_DEPENDENCIES=true
+
           export FOX_BUILD_DEVICE=mojito
-          export LC_ALL="C"
-          export FOX_VERSION="R11.1"
-          export FOX_BUILD_TYPE="Unofficial"
-          export FOX_MAINTAINER_PATCH_VERSION="0"
-          export OF_MAINTAINER="Abdalla"
-          export FOX_USE_TWRP_RECOVERY_IMAGE_BUILDER=1
-          
+          export ALLOW_MISSING_DEPENDENCIES=true
+          export LC_ALL=C
+
+          export FOX_BUILD_TYPE=Unofficial
+          export FOX_MAINTAINER_PATCH_VERSION=0
+          export OF_MAINTAINER=Abdalla
+
+          # لا تستخدم FOX_VERSION=R11.1
+          # لأننا نبني من branch 12.1
+
           source build/envsetup.sh
           lunch twrp_mojito-eng
-          
-          mka recoveryimage -j$(nproc)
+
+          echo "===== Build variables ====="
+          env | grep -E '^(FOX_|OF_|TW_)' | sort || true
+
+          echo "===== Starting build ====="
+
+          mka recoveryimage -j"$(nproc)"
+
+      - name: Show Build Output
+        if: always()
+        run: |
+          echo "===== Output directory ====="
+
+          ls -lah \
+            /mnt/orangefox/out/target/product/mojito \
+            || true
 
       - name: Upload Recovery
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox_Mojito_Recovery_Full
