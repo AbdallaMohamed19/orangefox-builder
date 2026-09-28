@@ -1,5 +1,4 @@
 name: Build OrangeFox 12.1 - mojito
-git ls-remote --heads https://gitlab.com/OrangeFox/Manifest.git
 
 on:
   workflow_dispatch:
@@ -10,6 +9,8 @@ jobs:
 
     env:
       FOX_PATH: ${{ github.workspace }}/fox_12.1
+      ALLOW_MISSING_DEPENDENCIES: "true"
+      LC_ALL: C
 
     steps:
 
@@ -94,149 +95,156 @@ jobs:
 
 
       # ============================================================
-      # CLONE THE COMPLETE ORANGEFOX SYNC REPOSITORY
+      # CHECK AVAILABLE ORANGEFOX MANIFEST
       # ============================================================
 
-      - name: Clone OrangeFox sync repository
+      - name: Check OrangeFox manifest
         run: |
           set -euxo pipefail
 
-          cd "$GITHUB_WORKSPACE"
-
-          rm -rf OrangeFox_sync
-
-          git clone \
-            --depth=1 \
-            https://gitlab.com/OrangeFox/sync.git \
-            OrangeFox_sync
-
           echo "============================================"
-          echo "ORANGEFOX SYNC REPOSITORY"
+          echo "ORANGEFOX MANIFEST"
           echo "============================================"
 
-          cd OrangeFox_sync
-
-          echo "Repository:"
-          git remote -v
-
-          echo ""
-          echo "Files:"
-          find . -maxdepth 2 -type f -print | sort | head -200
+          git ls-remote \
+            --heads \
+            https://gitlab.com/OrangeFox/Manifest.git
 
           echo ""
-          echo "Checking sync script:"
+          echo "============================================"
+          echo "ORANGEFOX RECOVERY 12.1"
+          echo "============================================"
 
-          SYNC_SCRIPT=$(find . \
-            -maxdepth 3 \
-            -type f \
-            -name 'orangefox_sync.sh' \
-            -print -quit)
-
-          if [ -z "$SYNC_SCRIPT" ]; then
-            echo "ERROR: orangefox_sync.sh not found."
-            exit 1
-          fi
-
-          echo "Found:"
-          echo "$SYNC_SCRIPT"
-
-          chmod +x "$SYNC_SCRIPT"
-
-          echo "$GITHUB_WORKSPACE/OrangeFox_sync/$SYNC_SCRIPT" \
-            > "$GITHUB_WORKSPACE/orangefox_sync_path.txt"
+          git ls-remote \
+            --heads \
+            https://gitlab.com/OrangeFox/bootable/Recovery.git \
+            fox_12.1
 
           echo ""
-          echo "Checking patch directory:"
+          echo "============================================"
+          echo "ORANGEFOX VENDOR 12.1"
+          echo "============================================"
 
-          if [ -d patches ]; then
-            ls -lah patches
-          else
-            echo "ERROR: patches directory is missing."
-            exit 1
-          fi
+          git ls-remote \
+            --heads \
+            https://gitlab.com/OrangeFox/vendor/recovery.git \
+            fox_12.1
 
 
       # ============================================================
-      # SYNC ORANGEFOX 12.1
+      # INITIALIZE AOSP/TWRP MANIFEST
       # ============================================================
 
-      - name: Sync OrangeFox 12.1
+      - name: Initialize Android source
         run: |
           set -euxo pipefail
-
-          SYNC_SCRIPT=$(cat "$GITHUB_WORKSPACE/orangefox_sync_path.txt")
-
-          echo "Using sync script:"
-          echo "$SYNC_SCRIPT"
-
-          echo ""
-          echo "Checking required patch:"
-
-          PATCH_FILE="$GITHUB_WORKSPACE/OrangeFox_sync/patches/patch-manifest-fox_12.1.diff"
-
-          if [ ! -f "$PATCH_FILE" ]; then
-            echo "ERROR: Required patch is missing:"
-            echo "$PATCH_FILE"
-
-            echo ""
-            echo "Available patches:"
-            find "$GITHUB_WORKSPACE/OrangeFox_sync/patches" \
-              -maxdepth 1 \
-              -type f \
-              -print | sort
-
-            exit 1
-          fi
-
-          echo "Patch found:"
-          ls -lh "$PATCH_FILE"
 
           rm -rf "$FOX_PATH"
 
           mkdir -p "$FOX_PATH"
 
+          cd "$FOX_PATH"
+
+          echo "============================================"
+          echo "INITIALIZING MANIFEST"
+          echo "============================================"
+
+          repo init \
+            -u https://gitlab.com/OrangeFox/Manifest.git \
+            -b fox_12.1 \
+            --depth=1
+
           echo ""
-          echo "============================================"
-          echo "SYNCING ORANGEFOX 12.1"
-          echo "============================================"
+          echo "Manifest initialized."
 
-          cd "$(dirname "$SYNC_SCRIPT")"
-
-          ./$(basename "$SYNC_SCRIPT") \
-            --branch 12.1 \
-            --path "$FOX_PATH"
+          ls -lah .repo/manifests
 
 
       # ============================================================
-      # VERIFY SOURCE
+      # SYNC SOURCE
       # ============================================================
 
-      - name: Verify OrangeFox source
+      - name: Sync Android source
         run: |
           set -euxo pipefail
 
           cd "$FOX_PATH"
 
           echo "============================================"
-          echo "VERIFY ORANGEFOX SOURCE"
+          echo "SYNCING SOURCE"
           echo "============================================"
 
-          test -d .repo
+          repo sync \
+            --force-sync \
+            --no-clone-bundle \
+            --no-tags \
+            --optimized-fetch \
+            --prune \
+            -j2
+
+          echo ""
+          echo "============================================"
+          echo "SYNC COMPLETE"
+          echo "============================================"
+
           test -f build/envsetup.sh
-
-          echo "OrangeFox source is ready."
-
-          echo ""
-          echo "Source:"
-          pwd
-
-          echo ""
-          echo "Disk usage:"
-          du -sh . || true
 
 
       # ============================================================
-      # DEVICE TREE
+      # ORANGEFOX RECOVERY
+      # ============================================================
+
+      - name: Verify OrangeFox recovery
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "============================================"
+          echo "RECOVERY"
+          echo "============================================"
+
+          if [ -d bootable/recovery ]; then
+            echo "bootable/recovery exists"
+          else
+            echo "ERROR: bootable/recovery missing"
+            exit 1
+          fi
+
+          git -C bootable/recovery branch -a || true
+
+          echo ""
+          echo "OrangeFox files:"
+
+          ls -la bootable/recovery | head -100
+
+
+      # ============================================================
+      # ORANGEFOX VENDOR
+      # ============================================================
+
+      - name: Verify OrangeFox vendor
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "============================================"
+          echo "VENDOR"
+          echo "============================================"
+
+          if [ -d vendor/recovery ]; then
+            echo "vendor/recovery exists"
+          else
+            echo "ERROR: vendor/recovery missing"
+            exit 1
+          fi
+
+          ls -la vendor/recovery | head -100
+
+
+      # ============================================================
+      # MOJITO DEVICE TREE
       # ============================================================
 
       - name: Clone mojito device tree
@@ -304,14 +312,44 @@ jobs:
 
           test -f kernel/xiaomi/mojito/Makefile
 
-          echo "Mojito kernel OK."
+          echo "Kernel OK."
+
+
+      # ============================================================
+      # CHECK DEVICE
+      # ============================================================
+
+      - name: Check device configuration
+        run: |
+          set -euxo pipefail
+
+          cd "$FOX_PATH"
+
+          echo "============================================"
+          echo "DEVICE CONFIGURATION"
+          echo "============================================"
+
+          test -f device/xiaomi/mojito/BoardConfig.mk
+          test -f device/xiaomi/mojito/AndroidProducts.mk
+          test -f device/xiaomi/mojito/device.mk
+
+          echo ""
+          echo "AndroidProducts.mk:"
+          cat device/xiaomi/mojito/AndroidProducts.mk
+
+          echo ""
+          echo "BoardConfig:"
+          grep -E \
+            'TARGET_BOARD_PLATFORM|TARGET_BOOTLOADER_BOARD_NAME|BOARD_BOOT_HEADER_VERSION|AB_OTA|VIRTUAL_AB' \
+            device/xiaomi/mojito/BoardConfig.mk \
+            || true
 
 
       # ============================================================
       # ENVIRONMENT
       # ============================================================
 
-      - name: Setup Android environment
+      - name: Setup build environment
         shell: bash
         run: |
           set -o pipefail
@@ -321,148 +359,4 @@ jobs:
           export ALLOW_MISSING_DEPENDENCIES=true
           export LC_ALL=C
 
-          echo "============================================"
-          echo "LOADING ENVIRONMENT"
-          echo "============================================"
-
-          unset TOP
-          unset OUT
-
-          source build/envsetup.sh
-
-          STATUS=$?
-
-          echo ""
-          echo "envsetup status: $STATUS"
-
-          if [ "$STATUS" -ne 0 ]; then
-            exit "$STATUS"
-          fi
-
-
-      # ============================================================
-      # LUNCH
-      # ============================================================
-
-      - name: Lunch mojito
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "$FOX_PATH"
-
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-
-          unset TOP
-          unset OUT
-
-          source build/envsetup.sh
-
-          lunch twrp_mojito-eng
-
-          echo ""
-          echo "TARGET_PRODUCT=${TARGET_PRODUCT:-}"
-          echo "TARGET_DEVICE=${TARGET_DEVICE:-}"
-          echo "TARGET_BUILD_VARIANT=${TARGET_BUILD_VARIANT:-}"
-
-
-      # ============================================================
-      # BUILD
-      # ============================================================
-
-      - name: Build OrangeFox
-        shell: bash
-        run: |
-          set -o pipefail
-
-          cd "$FOX_PATH"
-
-          export ALLOW_MISSING_DEPENDENCIES=true
-          export LC_ALL=C
-
-          unset TOP
-          unset OUT
-
-          source build/envsetup.sh
-
-          lunch twrp_mojito-eng
-
-          echo ""
-          echo "============================================"
-          echo "BUILDING RECOVERY"
-          echo "============================================"
-
-          mka recoveryimage
-
-
-      # ============================================================
-      # SHOW OUTPUT
-      # ============================================================
-
-      - name: Show build outputs
-        if: always()
-        shell: bash
-        run: |
-          set +e
-
-          cd "$FOX_PATH"
-
-          echo "============================================"
-          echo "TARGET PRODUCT"
-          echo "============================================"
-
-          ls -lah out/target/product/mojito 2>/dev/null || true
-
-          echo ""
-          echo "============================================"
-          echo "ALL IMG FILES"
-          echo "============================================"
-
-          find out \
-            -type f \
-            -name '*.img' \
-            -print \
-            2>/dev/null || true
-
-          echo ""
-          echo "============================================"
-          echo "ALL ZIP FILES"
-          echo "============================================"
-
-          find out \
-            -type f \
-            -name '*.zip' \
-            -print \
-            2>/dev/null || true
-
-          echo ""
-          echo "============================================"
-          echo "RECOVERY FILES"
-          echo "============================================"
-
-          find out \
-            -type f \
-            \( \
-              -iname '*recovery*' \
-              -o \
-              -iname '*orangefox*' \
-            \) \
-            -print \
-            2>/dev/null || true
-
-
-      # ============================================================
-      # ARTIFACTS
-      # ============================================================
-
-      - name: Upload OrangeFox artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrangeFox-mojito-build
-          path: |
-            fox_12.1/out/**/*.img
-            fox_12.1/out/**/*.zip
-          if-no-files-found: warn
-          retention-days: 7
+          echo "============================================
