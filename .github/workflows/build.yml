@@ -24,9 +24,7 @@ jobs:
       OF_MAINTAINER: Abdalla
       LC_ALL: C
       ALLOW_MISSING_DEPENDENCIES: "true"
-      USE_CCACHE: "1"
-      CCACHE_EXEC: /usr/bin/ccache
-      CCACHE_DIR: /home/runner/.ccache
+      USE_CCACHE: "0"
       GIT_TERMINAL_PROMPT: "0"
       DEBIAN_FRONTEND: noninteractive
 
@@ -100,7 +98,6 @@ jobs:
             bc \
             bison \
             build-essential \
-            ccache \
             curl \
             fontconfig \
             flex \
@@ -300,24 +297,6 @@ jobs:
           exit 0
 
       # ------------------------------------------------------------
-      - name: Restore ccache
-        uses: actions/cache/restore@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.device }}-${{ github.run_id }}
-          restore-keys: |
-            ccache-${{ inputs.device }}-
-
-      - name: Configure ccache
-        shell: bash
-        run: |
-          set -eux
-          mkdir -p "${CCACHE_DIR}"
-          ccache -M 5G
-          ccache --set-config=compression=true
-          ccache -s
-
-      # ------------------------------------------------------------
       - name: Build OrangeFox
         shell: bash
         timeout-minutes: 300
@@ -329,6 +308,9 @@ jobs:
 
           export FOX_BUILD_DEVICE="${DEVICE}"
           DEVICE_PATH="device/xiaomi/${DEVICE_TREE}"
+
+          # ccache is disabled: Android 12 build sandbox makes ~/.ccache read-only
+          unset USE_CCACHE CCACHE_EXEC CCACHE_DIR
 
           set +e
           source build/envsetup.sh
@@ -369,14 +351,6 @@ jobs:
           mka adbd "${MAKE_TARGET}" -j"$(nproc)" 2>&1 | tee "${HOME}/build.log"
 
       # ------------------------------------------------------------
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: /home/runner/.ccache
-          key: ccache-${{ inputs.device }}-${{ github.run_id }}
-
-      # ------------------------------------------------------------
       - name: Show build output
         if: always()
         shell: bash
@@ -415,9 +389,3 @@ jobs:
           name: build-log-${{ inputs.device }}
           if-no-files-found: ignore
           path: /home/runner/build.log
-
-      - name: Ccache statistics
-        if: always()
-        shell: bash
-        run: |
-          ccache -s || true
