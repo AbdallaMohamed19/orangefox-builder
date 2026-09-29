@@ -10,7 +10,7 @@ on:
         options:
           - sunny
           - mojito
-        default: mojito
+        default: sunny
 
 jobs:
   build:
@@ -18,116 +18,79 @@ jobs:
     timeout-minutes: 360
 
     env:
-      # OrangeFox manifest branch
       FOX_BRANCH: fox_12.1
-
-      # DO NOT define FOX_VERSION.
-      # OrangeFox determines its release version internally.
+      FOX_VERSION: R11.1
+      FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
-
       OF_MAINTAINER: Abdalla
-
-      # Android build environment
       LC_ALL: C
-      LANG: C
       ALLOW_MISSING_DEPENDENCIES: "true"
-
-      # ccache
       USE_CCACHE: "1"
       CCACHE_EXEC: /usr/bin/ccache
       CCACHE_DIR: /home/runner/.ccache
-
       GIT_TERMINAL_PROMPT: "0"
-
-      # Keep parallelism conservative because GitHub runner RAM is limited.
-      BUILD_JOBS: "2"
+      DEBIAN_FRONTEND: noninteractive
 
     steps:
-
-      # ============================================================
-      # DEVICE
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Set device variables
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          DEVICE="${{ inputs.device }}"
-
-          case "${DEVICE}" in
-            sunny|mojito)
-              ;;
-            *)
-              echo "ERROR: Unsupported device: ${DEVICE}"
-              exit 1
-              ;;
-          esac
-
-          {
-            echo "DEVICE=${DEVICE}"
-            echo "DEVICE_TREE=${DEVICE}"
-            echo "FOX_BUILD_DEVICE=${DEVICE}"
-          } >> "${GITHUB_ENV}"
-
-          echo "============================================"
-          echo "Selected device: ${DEVICE}"
-          echo "Device tree:     ${DEVICE}"
-          echo "FOX branch:      ${FOX_BRANCH}"
-          echo "Build jobs:      ${BUILD_JOBS}"
-          echo "============================================"
-
-      # ============================================================
-      # DISK
-      # ============================================================
-
-      - name: Free disk space
-        shell: bash
-        run: |
-          set -eux
-
-          sudo rm -rf /usr/share/dotnet || true
-          sudo rm -rf /usr/local/lib/android || true
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/share/boost || true
-          sudo rm -rf /usr/share/swift || true
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-
-          sudo docker image prune --all --force || true
-          sudo apt-get clean
-
-          echo "===== DISK ====="
-          df -h
-
-      # ============================================================
-      # SWAP
-      # ============================================================
-
-      - name: Add swap
         shell: bash
         run: |
           set -e
 
-          sudo swapoff -a || true
+          DEVICE="${{ inputs.device }}"
+
+          case "$DEVICE" in
+            sunny|mojito) ;;
+            *) echo "Unsupported device: $DEVICE"; exit 1 ;;
+          esac
+
+          {
+            echo "DEVICE=$DEVICE"
+            echo "DEVICE_TREE=$DEVICE"
+            echo "FOX_BUILD_DEVICE=$DEVICE"
+          } >> "$GITHUB_ENV"
+
+          echo "Device: $DEVICE"
+
+      # ------------------------------------------------------------
+      - name: Free disk space
+        run: |
+          set +e
+
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/.ghcup
+          sudo rm -rf /usr/local/share/boost
+          sudo rm -rf /usr/share/swift
+          sudo rm -rf /usr/share/miniconda
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/local/lib/node_modules
+          sudo docker image prune --all --force
+          sudo apt-get clean
+
+          df -h
+          exit 0
+
+      # ------------------------------------------------------------
+      - name: Add swap (avoid out-of-memory)
+        run: |
+          set +e
+          sudo swapoff -a
           sudo rm -f /mnt/swapfile
-
-          sudo fallocate -l 12G /mnt/swapfile
-          sudo chmod 600 /mnt/swapfile
-          sudo mkswap /mnt/swapfile
-          sudo swapon /mnt/swapfile
-
-          echo "===== MEMORY ====="
+          if sudo fallocate -l 10G /mnt/swapfile; then
+            sudo chmod 600 /mnt/swapfile
+            sudo mkswap /mnt/swapfile
+            sudo swapon /mnt/swapfile
+          else
+            echo "Could not create swap, continuing without it."
+          fi
           free -h
+          exit 0
 
-          echo "===== SWAP ====="
-          swapon --show
-
-      # ============================================================
-      # DEPENDENCIES
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Install build dependencies
-        shell: bash
         run: |
           set -eux
 
@@ -158,6 +121,7 @@ jobs:
             libx11-dev \
             libxml2 \
             libxml2-utils \
+            lz4 \
             lzop \
             pngcrush \
             python3 \
@@ -172,32 +136,17 @@ jobs:
             zip \
             zlib1g-dev
 
-          python --version
-          python3 --version
-          git --version
-          ccache --version
-
-      # ============================================================
-      # GIT
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Configure git
-        shell: bash
         run: |
-          set -eux
-
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@users.noreply.github.com"
           git config --global color.ui false
-
           git config --global http.postBuffer 524288000
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
 
-      # ============================================================
-      # REPO
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Install repo
         shell: bash
         run: |
@@ -205,209 +154,113 @@ jobs:
 
           mkdir -p "${HOME}/bin"
 
-          curl -L \
-            --retry 5 \
-            --retry-delay 5 \
-            --fail \
+          curl -L --retry 5 --retry-delay 5 \
             https://storage.googleapis.com/git-repo-downloads/repo \
             -o "${HOME}/bin/repo"
 
           chmod +x "${HOME}/bin/repo"
-
           echo "${HOME}/bin" >> "${GITHUB_PATH}"
 
           "${HOME}/bin/repo" version
 
-      # ============================================================
-      # ORANGEFOX SOURCE
-      # ============================================================
-
-      - name: Sync OrangeFox source
+      # ------------------------------------------------------------
+      - name: Sync OrangeFox source (with retries)
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
 
           cd "${HOME}"
+          rm -rf OrangeFox_sync fox_12.1
 
-          rm -rf OrangeFox_sync
-          rm -rf fox_12.1
-
-          echo "Cloning OrangeFox sync repository..."
-
-          for attempt in 1 2 3; do
-            if git clone \
-              --depth=1 \
-              https://gitlab.com/OrangeFox/sync.git \
-              OrangeFox_sync; then
-              break
-            fi
-
-            echo "Clone attempt ${attempt} failed."
-
+          for i in 1 2 3; do
+            git clone --depth=1 https://gitlab.com/OrangeFox/sync.git OrangeFox_sync && break
+            echo "Clone attempt $i failed, retrying..."
             rm -rf OrangeFox_sync
-
-            if [ "${attempt}" -eq 3 ]; then
-              echo "ERROR: Could not clone OrangeFox sync repository."
-              exit 1
-            fi
-
-            sleep 15
+            sleep 10
           done
 
-          SYNC_SCRIPT="$(
-            find "${HOME}/OrangeFox_sync" \
-              -type f \
-              -name "orangefox_sync.sh" \
-              -print -quit
-          )"
+          [ -d OrangeFox_sync ] || { echo "ERROR: could not clone sync repo"; exit 1; }
+
+          # The script sits in the root of the cloned repo, but search anyway
+          SYNC_SCRIPT="$(find "${HOME}/OrangeFox_sync" -name orangefox_sync.sh | head -n1)"
 
           if [ -z "${SYNC_SCRIPT}" ]; then
-            echo "ERROR: orangefox_sync.sh not found."
-            find "${HOME}/OrangeFox_sync" -maxdepth 3 -type f | head -100
+            echo "ERROR: orangefox_sync.sh not found. Repo contents:"
+            ls -laR "${HOME}/OrangeFox_sync" | head -n 50
             exit 1
           fi
 
-          echo "Using sync script:"
-          echo "${SYNC_SCRIPT}"
-
+          echo "Using sync script: ${SYNC_SCRIPT}"
           chmod +x "${SYNC_SCRIPT}"
-
           cd "$(dirname "${SYNC_SCRIPT}")"
 
-          SUCCESS=0
-
-          for attempt in 1 2 3; do
-            echo "============================================"
-            echo "OrangeFox sync attempt ${attempt}"
-            echo "============================================"
-
-            if ./orangefox_sync.sh \
-              --branch 12.1 \
-              --path "${HOME}/fox_12.1"; then
-
-              SUCCESS=1
+          OK=0
+          for i in 1 2 3; do
+            echo "=== Sync attempt $i ==="
+            if ./orangefox_sync.sh --branch 12.1 --path "${HOME}/fox_12.1"; then
+              OK=1
               break
             fi
-
-            echo "Sync failed."
-
-            if [ "${attempt}" -lt 3 ]; then
-              sleep 30
-            fi
+            echo "Sync attempt $i failed, retrying in 30s..."
+            sleep 30
           done
 
-          if [ "${SUCCESS}" -ne 1 ]; then
-            echo "ERROR: OrangeFox source sync failed."
-            exit 1
-          fi
+          [ "$OK" = "1" ] || { echo "ERROR: sync failed after 3 attempts"; exit 1; }
 
-          test -d "${HOME}/fox_12.1"
-          test -d "${HOME}/fox_12.1/vendor/recovery"
-
-          echo "OrangeFox source sync completed."
+          # Sanity check: the build system must exist
+          [ -f "${HOME}/fox_12.1/build/envsetup.sh" ] || { echo "ERROR: build/envsetup.sh missing after sync"; exit 1; }
 
           df -h
 
-      # ============================================================
-      # DEVICE TREE
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Sync device tree
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
 
           cd "${HOME}/fox_12.1"
 
-          DEVICE_PATH="device/xiaomi/${DEVICE_TREE}"
+          mkdir -p device/xiaomi
+          rm -rf "device/xiaomi/${DEVICE_TREE}"
 
-          rm -rf "${DEVICE_PATH}"
-          mkdir -p "device/xiaomi"
+          echo "Cloning OrangeFox device tree: ${DEVICE_TREE}"
 
-          echo "============================================"
-          echo "Device: ${DEVICE}"
-          echo "Device tree: ${DEVICE_PATH}"
-          echo "============================================"
+          if ! git clone --depth=1 -b "${FOX_BRANCH}" \
+              "https://gitlab.com/OrangeFox/device/${DEVICE_TREE}.git" \
+              "device/xiaomi/${DEVICE_TREE}"; then
 
-          # Official OrangeFox GitLab device repository.
-          DEVICE_REPO="https://gitlab.com/OrangeFox/device/${DEVICE_TREE}.git"
+            echo "GitLab tree not available, trying GitHub fallback..."
+            rm -rf "device/xiaomi/${DEVICE_TREE}"
 
-          echo "Trying:"
-          echo "${DEVICE_REPO}"
-
-          if git ls-remote --exit-code "${DEVICE_REPO}" >/dev/null 2>&1; then
-
-            git clone \
-              --depth=1 \
-              -b "${FOX_BRANCH}" \
-              "${DEVICE_REPO}" \
-              "${DEVICE_PATH}"
-
-          else
-
-            echo "The OrangeFox GitLab repository/branch was not available."
-
-            echo ""
-            echo "IMPORTANT:"
-            echo "A device tree is mandatory for building OrangeFox."
-            echo "Do not silently substitute an unrelated device tree."
-            echo ""
-
-            exit 1
+            git clone --depth=1 -b "${FOX_BRANCH}" \
+              "https://github.com/OrangeFox-Recovery-Devices/android_device_xiaomi_${DEVICE_TREE}_fox.git" \
+              "device/xiaomi/${DEVICE_TREE}" || {
+                echo "ERROR: could not clone a device tree for ${DEVICE_TREE}."
+                echo "Check the repo name / branch (${FOX_BRANCH})."
+                exit 1
+              }
           fi
 
-          echo "Device tree cloned successfully."
+          ls -la "device/xiaomi/${DEVICE_TREE}"
 
-          ls -la "${DEVICE_PATH}"
-
-      # ============================================================
-      # DEVICE TREE VALIDATION
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Validate device tree
         shell: bash
         run: |
-          set -euo pipefail
+          set -e
 
           DEVICE_PATH="${HOME}/fox_12.1/device/xiaomi/${DEVICE_TREE}"
 
-          echo "Validating:"
-          echo "${DEVICE_PATH}"
-
-          REQUIRED_FILES=(
-            "AndroidProducts.mk"
-            "BoardConfig.mk"
-          )
-
-          for file in "${REQUIRED_FILES[@]}"; do
-            if [ ! -f "${DEVICE_PATH}/${file}" ]; then
-              echo "ERROR: Missing ${file}"
+          for f in BoardConfig.mk AndroidProducts.mk; do
+            if [ ! -f "${DEVICE_PATH}/${f}" ]; then
+              echo "ERROR: ${f} not found in ${DEVICE_PATH}"
               exit 1
             fi
           done
 
-          if [ ! -f "${DEVICE_PATH}/vendorsetup.sh" ] &&
-             [ ! -f "${DEVICE_PATH}/AndroidProducts.mk" ]; then
-            echo "ERROR: Device tree does not appear to be a valid Android device tree."
-            exit 1
-          fi
-
-          echo ""
-          echo "===== PRODUCT FILES ====="
-
-          find "${DEVICE_PATH}" \
-            -maxdepth 1 \
-            -type f \
-            \( -name "*.mk" -o -name "*.sh" \) \
-            -print
-
-          echo ""
           echo "Device tree validation passed."
 
-      # ============================================================
-      # CCACHE
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
@@ -420,134 +273,63 @@ jobs:
         shell: bash
         run: |
           set -eux
-
           mkdir -p "${CCACHE_DIR}"
-
-          ccache -M 20G
+          # GitHub cache limit is 10GB per repo, keep ccache small enough to be saved
+          ccache -M 5G
           ccache --set-config=compression=true
-          ccache --set-config=max_size=20G
-
-          ccache -z
           ccache -s
 
-      # ============================================================
-      # BUILD
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Build OrangeFox
         shell: bash
         timeout-minutes: 300
         run: |
+          # NOTE: no "set -u": Android's envsetup.sh uses unset variables
           set -eo pipefail
 
           cd "${HOME}/fox_12.1"
 
-          # OrangeFox explicitly requires FOX_BUILD_DEVICE
-          # to be exported before building.
           export FOX_BUILD_DEVICE="${DEVICE}"
+          DEVICE_PATH="device/xiaomi/${DEVICE_TREE}"
 
-          echo "============================================"
-          echo "OrangeFox build"
-          echo "============================================"
-          echo "Device:        ${DEVICE}"
-          echo "Build device:  ${FOX_BUILD_DEVICE}"
-          echo "Branch:        ${FOX_BRANCH}"
-          echo "Maintainer:    ${OF_MAINTAINER}"
-          echo "Patch version: ${FOX_MAINTAINER_PATCH_VERSION}"
-          echo "Jobs:          ${BUILD_JOBS}"
-          echo "============================================"
-
-          # Load Android build environment.
+          set +e
           source build/envsetup.sh
+          # OrangeFox trees keep their FOX_* variables in vendorsetup.sh
+          if [ -f "${DEVICE_PATH}/vendorsetup.sh" ]; then
+            source "${DEVICE_PATH}/vendorsetup.sh"
+          fi
+          set -e
 
-          # The OrangeFox device trees normally expose twrp_<device>-eng.
-          TARGET="twrp_${DEVICE}-eng"
+          # Try the usual lunch target names
+          LUNCH_OK=""
+          for prefix in twrp omni fox; do
+            TARGET="${prefix}_${DEVICE}-eng"
+            echo "Trying lunch ${TARGET}"
+            if lunch "${TARGET}"; then
+              LUNCH_OK="${TARGET}"
+              break
+            fi
+          done
 
-          echo "Trying lunch target:"
-          echo "${TARGET}"
+          [ -n "${LUNCH_OK}" ] || { echo "ERROR: no valid lunch target for ${DEVICE}"; exit 1; }
 
-          lunch "${TARGET}"
+          echo "TARGET_PRODUCT = $(get_build_var TARGET_PRODUCT)"
+          echo "TARGET_DEVICE  = $(get_build_var TARGET_DEVICE)"
 
-          echo ""
-          echo "===== BUILD VARIABLES ====="
+          # A-only device -> recoveryimage, A/B device -> bootimage
+          if grep -rEqs "^\s*(export\s+)?(FOX_AB_DEVICE|AB_OTA_UPDATER)\s*:?=\s*(1|true)" "${DEVICE_PATH}"; then
+            MAKE_TARGET="bootimage"
+          else
+            MAKE_TARGET="recoveryimage"
+          fi
+          echo "Building target: adbd ${MAKE_TARGET}"
 
-          get_build_var TARGET_PRODUCT
-          get_build_var TARGET_DEVICE
-          get_build_var TARGET_ARCH
-          get_build_var TARGET_BUILD_VARIANT
-
-          echo ""
-          echo "===== ORANGEFOX VARIABLES ====="
-
-          env | grep -E \
-            '^(FOX_|OF_)' \
-            | sort \
-            || true
-
-          echo ""
-          echo "===== MEMORY ====="
+          df -h
           free -h
 
-          echo ""
-          echo "===== DISK ====="
-          df -h
+          mka adbd "${MAKE_TARGET}" -j"$(nproc)" 2>&1 | tee "${HOME}/build.log"
 
-          echo ""
-          echo "===== CCACHE ====="
-          ccache -s || true
-
-          # --------------------------------------------------------
-          # Do not guess A/B from arbitrary device-tree strings.
-          #
-          # OrangeFox provides FOX_AB_DEVICE for A/B devices.
-          # We first check the resulting build environment.
-          # --------------------------------------------------------
-
-          if grep -RqsE \
-            '(^|[[:space:]])(FOX_AB_DEVICE|OF_AB_DEVICE)[[:space:]]*[:?]?=' \
-            "device/xiaomi/${DEVICE_TREE}"; then
-
-            echo "A/B configuration detected from device tree."
-
-            export FOX_AB_DEVICE=1
-
-          fi
-
-          # Virtual A/B devices on fox_12.1 may need the dedicated
-          # OrangeFox variable. Only enable it when explicitly declared
-          # by the device tree.
-          if grep -RqsE \
-            '(^|[[:space:]])FOX_VIRTUAL_AB_DEVICE[[:space:]]*[:?]?=[[:space:]]*1' \
-            "device/xiaomi/${DEVICE_TREE}"; then
-
-            echo "Virtual A/B configuration detected."
-
-            export FOX_VIRTUAL_AB_DEVICE=1
-          fi
-
-          echo ""
-          echo "===== FINAL ORANGEFOX VARIABLES ====="
-
-          env | grep -E \
-            '^(FOX_|OF_)' \
-            | sort \
-            || true
-
-          echo ""
-          echo "===== START BUILD ====="
-
-          # Use a conservative job count for the GitHub runner.
-          mka -j"${BUILD_JOBS}" \
-            recoveryimage \
-            2>&1 | tee "${HOME}/build.log"
-
-          echo ""
-          echo "===== BUILD FINISHED ====="
-
-      # ============================================================
-      # CCACHE SAVE
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Save ccache
         if: always()
         uses: actions/cache/save@v4
@@ -555,54 +337,26 @@ jobs:
           path: /home/runner/.ccache
           key: ccache-${{ inputs.device }}-${{ github.run_id }}
 
-      # ============================================================
-      # OUTPUT
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Show build output
         if: always()
         shell: bash
         run: |
           set +e
-
           PRODUCT_OUT="${HOME}/fox_12.1/out/target/product/${DEVICE}"
 
-          echo "============================================"
-          echo "PRODUCT OUTPUT"
-          echo "============================================"
-
           if [ -d "${PRODUCT_OUT}" ]; then
-
             ls -lah "${PRODUCT_OUT}"
-
-            echo ""
-            echo "===== IMAGES ====="
-
-            find "${PRODUCT_OUT}" \
-              -maxdepth 1 \
-              -type f \
-              -name "*.img" \
-              -print
-
-            echo ""
-            echo "===== ZIP FILES ====="
-
-            find "${PRODUCT_OUT}" \
-              -maxdepth 1 \
-              -type f \
-              -name "*.zip" \
-              -print
-
+            echo "Images:"
+            find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.img" -print
+            echo "ZIPs:"
+            find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.zip" -print
           else
-
             echo "Product output directory does not exist."
-
           fi
+          exit 0
 
-      # ============================================================
-      # UPLOAD RECOVERY
-      # ============================================================
-
+      # ------------------------------------------------------------
       - name: Upload OrangeFox
         if: success()
         uses: actions/upload-artifact@v4
@@ -611,14 +365,9 @@ jobs:
           if-no-files-found: error
           compression-level: 9
           path: |
-            /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/OrangeFox*.img
             /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/recovery.img
             /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/boot.img
             /home/runner/fox_12.1/out/target/product/${{ inputs.device }}/OrangeFox*.zip
-
-      # ============================================================
-      # LOG
-      # ============================================================
 
       - name: Upload build log
         if: always()
@@ -626,12 +375,7 @@ jobs:
         with:
           name: build-log-${{ inputs.device }}
           if-no-files-found: ignore
-          compression-level: 9
           path: /home/runner/build.log
-
-      # ============================================================
-      # CCACHE STATS
-      # ============================================================
 
       - name: Ccache statistics
         if: always()
