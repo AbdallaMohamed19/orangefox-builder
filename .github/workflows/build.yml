@@ -258,6 +258,24 @@ jobs:
           echo "Device tree validation passed."
 
       # ------------------------------------------------------------
+      - name: Fix obsolete variables in device tree
+        shell: bash
+        run: |
+          set +e
+          cd "${HOME}/fox_12.1"
+          TREE="device/xiaomi/${DEVICE_TREE}"
+
+          echo "Places using OF_VIRTUAL_AB_DEVICE:"
+          grep -rn --exclude-dir=.git "OF_VIRTUAL_AB_DEVICE" "${TREE}"
+
+          grep -rl --exclude-dir=.git "OF_VIRTUAL_AB_DEVICE" "${TREE}" \
+            | xargs -r sed -i 's/OF_VIRTUAL_AB_DEVICE/FOX_VIRTUAL_AB_DEVICE/g'
+
+          echo "----- All obsolete-variable checks in orangefox.mk -----"
+          grep -n "obsolete" bootable/recovery/orangefox.mk
+          exit 0
+
+      # ------------------------------------------------------------
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
@@ -314,7 +332,7 @@ jobs:
           echo "TARGET_DEVICE  = $(get_build_var TARGET_DEVICE)"
 
           # A-only device -> recoveryimage, A/B device -> bootimage
-          if grep -rEqs "^\s*(export\s+)?(FOX_AB_DEVICE|AB_OTA_UPDATER)\s*:?=\s*(1|true)" "${DEVICE_PATH}"; then
+          if grep -rEqs "^\s*(export\s+)?(FOX_AB_DEVICE|FOX_VIRTUAL_AB_DEVICE|AB_OTA_UPDATER)\s*:?=\s*(1|true)" "${DEVICE_PATH}"; then
             MAKE_TARGET="bootimage"
           else
             MAKE_TARGET="recoveryimage"
