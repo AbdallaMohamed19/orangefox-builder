@@ -19,7 +19,6 @@ jobs:
 
     env:
       FOX_BRANCH: fox_12.1
-      FOX_VERSION: R11.1
       FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
       OF_MAINTAINER: Abdalla
@@ -181,7 +180,6 @@ jobs:
 
           [ -d OrangeFox_sync ] || { echo "ERROR: could not clone sync repo"; exit 1; }
 
-          # The script sits in the root of the cloned repo, but search anyway
           SYNC_SCRIPT="$(find "${HOME}/OrangeFox_sync" -name orangefox_sync.sh | head -n1)"
 
           if [ -z "${SYNC_SCRIPT}" ]; then
@@ -207,7 +205,6 @@ jobs:
 
           [ "$OK" = "1" ] || { echo "ERROR: sync failed after 3 attempts"; exit 1; }
 
-          # Sanity check: the build system must exist
           [ -f "${HOME}/fox_12.1/build/envsetup.sh" ] || { echo "ERROR: build/envsetup.sh missing after sync"; exit 1; }
 
           df -h
@@ -274,7 +271,6 @@ jobs:
         run: |
           set -eux
           mkdir -p "${CCACHE_DIR}"
-          # GitHub cache limit is 10GB per repo, keep ccache small enough to be saved
           ccache -M 5G
           ccache --set-config=compression=true
           ccache -s
@@ -294,13 +290,14 @@ jobs:
 
           set +e
           source build/envsetup.sh
-          # OrangeFox trees keep their FOX_* variables in vendorsetup.sh
           if [ -f "${DEVICE_PATH}/vendorsetup.sh" ]; then
             source "${DEVICE_PATH}/vendorsetup.sh"
           fi
           set -e
 
-          # Try the usual lunch target names
+          # FOX_VERSION is obsolete in recent OrangeFox and breaks the build
+          unset FOX_VERSION
+
           LUNCH_OK=""
           for prefix in twrp omni fox; do
             TARGET="${prefix}_${DEVICE}-eng"
