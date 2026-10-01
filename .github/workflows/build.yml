@@ -21,7 +21,7 @@ jobs:
       FOX_BRANCH: fox_12.1
       FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
-      OF_MAINTAINER: Abdalla
+      MAINTAINER_NAME: Abdalla
       LC_ALL: C
       ALLOW_MISSING_DEPENDENCIES: "true"
       USE_CCACHE: "0"
@@ -294,6 +294,25 @@ jobs:
             fi
           done < /tmp/obsolete_map.txt
 
+          echo "----- OF_MAINTAINER / About-page flags in tree (before) -----"
+          grep -rn --exclude-dir=.git -E "OF_MAINTAINER|OF_DISABLE_EXTRA_ABOUT_PAGE" "${TREE}"
+
+          # Force our maintainer name inside the tree (it may set its own)
+          grep -rl --exclude-dir=.git "OF_MAINTAINER" "${TREE}" | while read -r f; do
+            case "$f" in
+              *.mk)
+                sed -i -E "s|^([[:space:]]*OF_MAINTAINER[[:space:]]*:?=).*|\1 ${MAINTAINER_NAME}|" "$f" ;;
+              *)
+                sed -i -E "s|^([[:space:]]*(export[[:space:]]+)?OF_MAINTAINER=).*|\1\"${MAINTAINER_NAME}\"|" "$f" ;;
+            esac
+          done
+
+          echo "----- OF_MAINTAINER in tree (after) -----"
+          grep -rn --exclude-dir=.git "OF_MAINTAINER" "${TREE}"
+
+          echo "----- USB OTG related lines in tree (diagnostic) -----"
+          grep -rniE "otg" --exclude-dir=.git "${TREE}" | head -n 40
+
           exit 0
 
       # ------------------------------------------------------------
@@ -321,6 +340,10 @@ jobs:
 
           # FOX_VERSION is obsolete in recent OrangeFox and breaks the build
           unset FOX_VERSION
+
+          # Force our maintainer name (a device tree may set its own)
+          export OF_MAINTAINER="${MAINTAINER_NAME}"
+          echo "OF_MAINTAINER=${OF_MAINTAINER}"
 
           LUNCH_OK=""
           for prefix in twrp omni fox; do
