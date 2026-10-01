@@ -11,6 +11,11 @@ on:
           - sunny
           - mojito
         default: sunny
+      usb_automount:
+        description: "Experimental: auto-mount USB flash drive inside recovery"
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -316,6 +321,134 @@ jobs:
           exit 0
 
       # ------------------------------------------------------------
+      - name: Add USB auto-mount helper (experimental)
+        if: ${{ inputs.usb_automount }}
+        shell: bash
+        run: |
+          set +e
+          cd "${HOME}/fox_12.1"
+          TREE="device/xiaomi/${DEVICE_TREE}"
+
+          # 1) Find the USB entry the tree already defines (fstab / twrp.flags)
+          LINE="$(grep -rhiE --include='*fstab*' --include='*.flags' \
+            '^[[:space:]]*/[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/dev/' "${TREE}" \
+            | grep -i 'removable' | grep -iE 'usb|otg' | head -n1)"
+
+          if [ -z "${LINE}" ]; then
+            echo "No USB entry found in the tree's fstab/flags. Skipping auto-mount helper."
+            exit 0
+          fi
+          echo "USB fstab line: ${LINE}"
+
+          MNT="$(echo "${LINE}" | awk '{print $1}')"
+          DEV1="$(echo "${LINE}" | awk '{print $3}')"
+          DEV2="$(echo "${LINE}" | awk '{print $4}')"
+          case "${DEV2}" in /dev/*) ;; *) DEV2="" ;; esac
+
+          # Safety: only ever touch a mount point that clearly is the USB one
+          case "$(echo "${MNT}" | tr 'A-Z' 'a-z')" in
+            *usb*|*otg*) ;;
+            *) echo "Mount point ${MNT} does not look like USB. Skipping."; exit 0 ;;
+          esac
+
+          # 2) Write the helper script that goes into the recovery ramdisk
+          mkdir -p "${TREE}/recovery/root/system/bin"
+          SCRIPT="${TREE}/recovery/root/system/bin/usb_automount.sh"
+
+          cat > "${SCRIPT}" <<'HELPER_EOF'
+          #!/system/bin/sh
+          # Experimental USB auto-mount helper (added by CI)
+          MNT="@MNT@"
+          DEVS="@DEVS@"
+
+          PREV=0
+          TRIES=0
+          OURS=0
+
+          is_usb() {
+            # accept only block devices that really sit on the USB bus
+            P="$(readlink -f /sys/class/block/${1##*/} 2>/dev/null)"
+            case "$P" in
+              *usb*) return 0 ;;
+            esac
+            return 1
+          }
+
+          while true; do
+            FOUND=""
+            for d in $DEVS; do
+              if [ -b "$d" ] && is_usb "$d"; then
+                FOUND="$d"
+                break
+              fi
+            done
+
+            if [ -n "$FOUND" ]; then
+              if [ "$PREV" = "0" ]; then
+                sleep 2
+                if ! grep -q " $MNT " /proc/mounts; then
+                  mkdir -p "$MNT"
+                  mount "$FOUND" "$MNT" 2>/dev/null ||
+                  mount -t vfat -o rw "$FOUND" "$MNT" 2>/dev/null ||
+                  mount -t exfat "$FOUND" "$MNT" 2>/dev/null ||
+                  mount -t ntfs "$FOUND" "$MNT" 2>/dev/null ||
+                  mount -t ext4 "$FOUND" "$MNT" 2>/dev/null
+                  if grep -q " $MNT " /proc/mounts; then OURS=1; fi
+                fi
+                if grep -q " $MNT " /proc/mounts; then
+                  PREV=1
+                  TRIES=0
+                else
+                  TRIES=$((TRIES + 1))
+                  if [ "$TRIES" -ge 5 ]; then PREV=1; fi
+                fi
+              fi
+            else
+              PREV=0
+              TRIES=0
+              # drive was pulled: drop only a mount that this script created
+              if [ "$OURS" = "1" ]; then
+                umount -l "$MNT" 2>/dev/null
+                OURS=0
+              fi
+            fi
+            sleep 3
+          done
+          HELPER_EOF
+
+          sed -i "s|@MNT@|${MNT}|; s|@DEVS@|${DEV1} ${DEV2}|" "${SCRIPT}"
+          chmod 755 "${SCRIPT}"
+
+          # 3) Register it as a service in the tree's recovery init rc
+          RC="$(find "${TREE}" -type f -name 'init.recovery*.rc' \
+            | awk '{print length($0), $0}' | sort -n | head -n1 | cut -d' ' -f2-)"
+
+          if [ -z "${RC}" ]; then
+            RC="${TREE}/recovery/root/init.recovery.qcom.rc"
+            echo "No init.recovery*.rc found, creating ${RC}"
+          fi
+          echo "Appending service to: ${RC}"
+
+          cat >> "${RC}" <<'RC_EOF'
+
+          service usbautomount /system/bin/sh /system/bin/usb_automount.sh
+              user root
+              group root
+              disabled
+              seclabel u:r:recovery:s0
+
+          on boot
+              start usbautomount
+          RC_EOF
+
+          echo "----- helper script -----"
+          cat "${SCRIPT}"
+          echo "----- end of ${RC} -----"
+          tail -n 12 "${RC}"
+
+          exit 0
+
+      # ------------------------------------------------------------
       - name: Build OrangeFox
         shell: bash
         timeout-minutes: 300
@@ -397,7 +530,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: OrangeFox-${{ inputs.device }}-fox12.1
+          name: OrangeFox-${{ inputs.device }}-fox12.1${{ inputs.usb_automount && '-usbmount' || '' }}
           if-no-files-found: error
           compression-level: 9
           path: |
@@ -409,6 +542,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-log-${{ inputs.device }}
+          name: build-log-${{ inputs.device }}${{ inputs.usb_automount && '-usbmount' || '' }}
           if-no-files-found: ignore
           path: /home/runner/build.log
