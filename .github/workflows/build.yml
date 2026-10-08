@@ -12,10 +12,10 @@ on:
           - mojito
         default: sunny
       usb_automount:
-        description: "Experimental: auto-mount USB flash drive inside recovery"
+        description: "Experimental: show USB OTG flash drive in the storage list + auto-mount it in recovery"
         required: false
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:
@@ -26,7 +26,7 @@ jobs:
       FOX_BRANCH: fox_12.1
       FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
-      MAINTAINER_NAME: Abdalla Mohammed
+      MAINTAINER_NAME: Abdalla
       LC_ALL: C
       ALLOW_MISSING_DEPENDENCIES: "true"
       USE_CCACHE: "0"
@@ -321,7 +321,7 @@ jobs:
           exit 0
 
       # ------------------------------------------------------------
-      - name: Add USB auto-mount helper (experimental)
+      - name: Add USB OTG storage entry + auto-mount helper
         if: ${{ inputs.usb_automount }}
         shell: bash
         run: |
@@ -329,94 +329,257 @@ jobs:
           cd "${HOME}/fox_12.1"
           TREE="device/xiaomi/${DEVICE_TREE}"
 
-          # 1) Find the USB entry the tree already defines (fstab / twrp.flags)
-          LINE="$(grep -rhiE --include='*fstab*' --include='*.flags' \
-            '^[[:space:]]*/[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+/dev/' "${TREE}" \
-            | grep -i 'removable' | grep -iE 'usb|otg' | head -n1)"
+          # Stable path the helper keeps pointing at the plugged-in flash drive.
+          # The fstab entry uses it, so the drive shows up in the "Select Storage"
+          # list no matter what the real node is called (sda1, sdg1, ...).
+          LINK="/dev/block/usb_otg_part"
 
-          if [ -z "${LINE}" ]; then
-            echo "No USB entry found in the tree's fstab/flags. Skipping auto-mount helper."
+          # 1) Add / fix the USB OTG storage entry in the tree's recovery fstab
+          cat > /tmp/patch_usb_fstab.py <<'PY_EOF'
+          import os
+          import re
+          import sys
+
+          tree, link, default_mnt = sys.argv[1:4]
+
+          # TWRP fstab line: <mount> <fstype> <device> [<device2>] [flags=...]
+          LINE = re.compile(r'^(/\S*)\s+(\S+)\s+(/\S+)(?:\s+(/\S+))?(?:\s+(.*))?$')
+          NEW_FLAGS = 'flags=display="USB OTG";storage;removable'
+
+
+          def log(msg):
+              print(msg, file=sys.stderr)
+
+
+          def is_usb(mount):
+              return re.search(r'usb|otg', mount, re.I) is not None
+
+
+          def has_flag(rest, name):
+              return re.search(r'(?:flags=|;)' + name + r'(?:;|\s|$)', rest) is not None
+
+
+          def read(path):
+              with open(path, encoding='utf-8', errors='replace', newline='') as f:
+                  return f.read()
+
+
+          # fstab-like files that use the TWRP format (they have "flags=" lines)
+          cands = []
+          for root, dirs, names in os.walk(tree):
+              dirs[:] = [d for d in dirs if d != '.git']
+              for n in names:
+                  low = n.lower()
+                  path = os.path.join(root, n)
+                  if not ('fstab' in low or low.endswith('.flags')):
+                      continue
+                  if os.path.getsize(path) > 1000000:
+                      continue
+                  for ln in read(path).splitlines():
+                      m = LINE.match(ln.strip())
+                      if m and 'flags=' in (m.group(5) or ''):
+                          cands.append(path)
+                          break
+          cands.sort(key=lambda p: (len(p), p))
+
+          if not cands:
+              log('No TWRP-format fstab / twrp.flags found in ' + tree)
+              sys.exit(0)
+
+          # reuse the mount point the tree already uses for USB, if any
+          mnt = default_mnt
+          found = False
+          for path in cands:
+              for ln in read(path).splitlines():
+                  s = ln.strip()
+                  m = None if s.startswith('#') else LINE.match(s)
+                  if m and is_usb(m.group(1)):
+                      mnt = m.group(1)
+                      found = True
+                      break
+              if found:
+                  break
+
+          for path in cands:
+              text = read(path)
+              lines = text.split('\n')
+              done = False
+              for i, ln in enumerate(lines):
+                  s = ln.strip()
+                  m = None if s.startswith('#') else LINE.match(s)
+                  if not (m and is_usb(m.group(1))):
+                      continue
+                  mount, fstype, dev1, dev2, rest = m.groups()
+                  rest = rest or ''
+                  # new primary device = our symlink, the old one stays as fallback
+                  old = dev2 if dev1 == link else dev1
+                  if 'flags=' not in rest:
+                      rest = (rest + ' ' + NEW_FLAGS).strip()
+                  for flag in ('storage', 'removable'):
+                      if not has_flag(rest, flag):
+                          rest = rest.rstrip().rstrip(';') + ';' + flag
+                  cols = [mount, fstype, link] + ([old] if old else []) + [rest]
+                  lines[i] = ' '.join(cols) + ('\r' if ln.endswith('\r') else '')
+                  log('%s: updated  -> %s' % (path, lines[i].strip()))
+                  done = True
+                  break
+              if not done:
+                  entry = '%s auto %s %s' % (mnt, link, NEW_FLAGS)
+                  if text and not text.endswith('\n'):
+                      text += '\n'
+                  text += '\n# USB OTG storage entry (added by CI)\n' + entry + '\n'
+                  lines = text.split('\n')
+                  log('%s: appended -> %s' % (path, entry))
+              with open(path, 'w', encoding='utf-8', newline='') as f:
+                  f.write('\n'.join(lines))
+
+          print(mnt)
+          PY_EOF
+
+          MNT="$(python3 /tmp/patch_usb_fstab.py "${TREE}" "${LINK}" /usb_otg)"
+          if [ -z "${MNT}" ]; then
+            echo "Could not add a USB OTG entry (no TWRP-format fstab found). Skipping helper."
+            echo "fstab-like files in the tree:"
+            find "${TREE}" -type f \( -iname '*fstab*' -o -iname '*.flags' \) -not -path '*/.git/*'
             exit 0
           fi
-          echo "USB fstab line: ${LINE}"
+          echo "USB OTG mount point: ${MNT}"
 
-          MNT="$(echo "${LINE}" | awk '{print $1}')"
-          DEV1="$(echo "${LINE}" | awk '{print $3}')"
-          DEV2="$(echo "${LINE}" | awk '{print $4}')"
-          case "${DEV2}" in /dev/*) ;; *) DEV2="" ;; esac
-
-          # Safety: only ever touch a mount point that clearly is the USB one
-          case "$(echo "${MNT}" | tr 'A-Z' 'a-z')" in
-            *usb*|*otg*) ;;
-            *) echo "Mount point ${MNT} does not look like USB. Skipping."; exit 0 ;;
-          esac
-
-          # 2) Write the helper script that goes into the recovery ramdisk
+          # 2) Helper script that goes into the recovery ramdisk
           mkdir -p "${TREE}/recovery/root/system/bin"
           SCRIPT="${TREE}/recovery/root/system/bin/usb_automount.sh"
 
           cat > "${SCRIPT}" <<'HELPER_EOF'
           #!/system/bin/sh
-          # Experimental USB auto-mount helper (added by CI)
+          # USB OTG auto-mount helper (added by CI)
+          #  - keeps $LINK pointing at the plugged-in USB partition, so the recovery
+          #    storage list (fstab entry for $MNT) can see the drive
+          #  - mounts the drive on $MNT as soon as it is detected
+          # Log: /tmp/usb_automount.log (also copied into /tmp/recovery.log)
           MNT="@MNT@"
-          DEVS="@DEVS@"
+          LINK="@LINK@"
+          LOG=/tmp/usb_automount.log
 
-          PREV=0
-          TRIES=0
-          OURS=0
+          log() {
+            echo "usb_automount: $*" >> "$LOG"
+            echo "usb_automount: $*" >> /tmp/recovery.log
+          }
 
-          is_usb() {
-            # accept only block devices that really sit on the USB bus
-            P="$(readlink -f /sys/class/block/${1##*/} 2>/dev/null)"
-            case "$P" in
-              *usb*) return 0 ;;
+          # names of the partitions (or the bare disk when there is no partition
+          # table) of every disk that really sits on the USB bus
+          list_usb() {
+            for d in /sys/block/sd*; do
+              [ -e "$d" ] || continue
+              n="${d##*/}"
+              case "$(readlink -f "$d" 2>/dev/null)" in
+                *usb*) ;;
+                *) continue ;;
+              esac
+              P=""
+              for p in "$d"/"$n"*; do
+                [ -e "$p/partition" ] && P="$P ${p##*/}"
+              done
+              if [ -n "$P" ]; then
+                echo $P
+              else
+                SZ="$(cat "$d/size" 2>/dev/null)"
+                [ "${SZ:-0}" -gt 0 ] 2>/dev/null && echo "$n"
+              fi
+            done
+          }
+
+          # make sure /dev/block/<name> exists (ueventd normally creates it)
+          ensure_node() {
+            [ -e "/dev/block/$1" ] && return 0
+            NUM="$(cat "/sys/class/block/$1/dev" 2>/dev/null)"
+            [ -n "$NUM" ] || return 1
+            mknod "/dev/block/$1" b "${NUM%%:*}" "${NUM##*:}" 2>/dev/null
+            [ -e "/dev/block/$1" ]
+          }
+
+          # unmount $MNT when it still points at a drive that was unplugged
+          drop_stale() {
+            SRC=""
+            while read -r a b c; do
+              [ "$b" = "$MNT" ] && SRC="$a"
+            done < /proc/mounts
+            case "$SRC" in
+              /dev/block/*)
+                if [ ! -e "/sys/class/block/${SRC##*/}" ]; then
+                  umount -l "$MNT" 2>/dev/null
+                  log "unmounted stale $MNT ($SRC)"
+                fi
+                ;;
             esac
+          }
+
+          try_mount() {
+            mkdir -p "$MNT"
+            drop_stale
+            FIRST=""
+            for n in "$@"; do
+              ensure_node "$n" || continue
+              dev="/dev/block/$n"
+              if [ -z "$FIRST" ]; then
+                FIRST="$n"
+                ln -sf "$dev" "$LINK"
+              fi
+              if grep -q " $MNT " /proc/mounts; then
+                log "$MNT already mounted"
+                return 0
+              fi
+              mount "$dev" "$MNT" 2>/dev/null ||
+              mount -t vfat -o rw "$dev" "$MNT" 2>/dev/null ||
+              mount -t exfat "$dev" "$MNT" 2>/dev/null ||
+              mount -t ntfs "$dev" "$MNT" 2>/dev/null ||
+              mount -t ext4 "$dev" "$MNT" 2>/dev/null
+              if grep -q " $MNT " /proc/mounts; then
+                log "mounted $dev on $MNT"
+                ln -sf "$dev" "$LINK"
+                return 0
+              fi
+              log "could not mount $dev"
+            done
             return 1
           }
 
-          while true; do
-            FOUND=""
-            for d in $DEVS; do
-              if [ -b "$d" ] && is_usb "$d"; then
-                FOUND="$d"
-                break
-              fi
-            done
+          log "started (mount point $MNT, link $LINK)"
+          LAST=""
+          DONE=0
+          TRIES=0
 
-            if [ -n "$FOUND" ]; then
-              if [ "$PREV" = "0" ]; then
-                sleep 2
-                if ! grep -q " $MNT " /proc/mounts; then
-                  mkdir -p "$MNT"
-                  mount "$FOUND" "$MNT" 2>/dev/null ||
-                  mount -t vfat -o rw "$FOUND" "$MNT" 2>/dev/null ||
-                  mount -t exfat "$FOUND" "$MNT" 2>/dev/null ||
-                  mount -t ntfs "$FOUND" "$MNT" 2>/dev/null ||
-                  mount -t ext4 "$FOUND" "$MNT" 2>/dev/null
-                  if grep -q " $MNT " /proc/mounts; then OURS=1; fi
-                fi
-                if grep -q " $MNT " /proc/mounts; then
-                  PREV=1
-                  TRIES=0
-                else
-                  TRIES=$((TRIES + 1))
-                  if [ "$TRIES" -ge 5 ]; then PREV=1; fi
-                fi
+          while true; do
+            CAND="$(echo $(list_usb))"
+            if [ "$CAND" != "$LAST" ]; then
+              # plugged in, pulled out or swapped
+              if [ -n "$LAST" ]; then
+                log "USB storage removed or changed ($LAST)"
+                rm -f "$LINK"
+                drop_stale
               fi
-            else
-              PREV=0
+              DONE=0
               TRIES=0
-              # drive was pulled: drop only a mount that this script created
-              if [ "$OURS" = "1" ]; then
-                umount -l "$MNT" 2>/dev/null
-                OURS=0
+              if [ -n "$CAND" ]; then
+                sleep 2   # let the partition table settle
+                CAND="$(echo $(list_usb))"
+                log "USB storage detected: $CAND"
+              fi
+              LAST="$CAND"
+            fi
+
+            if [ -n "$CAND" ] && [ "$DONE" = "0" ]; then
+              if try_mount $CAND; then
+                DONE=1
+              else
+                TRIES=$((TRIES + 1))
+                [ "$TRIES" -ge 5 ] && DONE=1
               fi
             fi
             sleep 3
           done
           HELPER_EOF
 
-          sed -i "s|@MNT@|${MNT}|; s|@DEVS@|${DEV1} ${DEV2}|" "${SCRIPT}"
+          sed -i "s|@MNT@|${MNT}|g; s|@LINK@|${LINK}|g" "${SCRIPT}"
           chmod 755 "${SCRIPT}"
 
           # 3) Register it as a service in the tree's recovery init rc
@@ -441,8 +604,8 @@ jobs:
               start usbautomount
           RC_EOF
 
-          echo "----- helper script -----"
-          cat "${SCRIPT}"
+          echo "----- USB lines in the tree's fstab files -----"
+          grep -rniE --include='*fstab*' --include='*.flags' 'usb|otg' "${TREE}"
           echo "----- end of ${RC} -----"
           tail -n 12 "${RC}"
 
@@ -522,6 +685,14 @@ jobs:
             find "${PRODUCT_OUT}" -maxdepth 1 -type f -name "*.zip" -print
           else
             echo "Product output directory does not exist."
+          fi
+
+          if [ "${{ inputs.usb_automount }}" = "true" ]; then
+            ROOT="${PRODUCT_OUT}/recovery/root"
+            echo "----- USB OTG check inside the recovery ramdisk -----"
+            ls -l "${ROOT}/system/bin/usb_automount.sh"
+            grep -rniE --include='*fstab*' --include='*.flags' 'usb|otg' "${ROOT}" | head -n 10
+            grep -rn --include='*.rc' 'usbautomount' "${ROOT}" | head -n 5
           fi
           exit 0
 
