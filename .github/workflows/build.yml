@@ -26,7 +26,7 @@ jobs:
       FOX_BRANCH: fox_12.1
       FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
-      MAINTAINER_NAME: Abdalla Mohammed
+      MAINTAINER_NAME: Abdalla Mohamed 
       LC_ALL: C
       ALLOW_MISSING_DEPENDENCIES: "true"
       USE_CCACHE: "0"
