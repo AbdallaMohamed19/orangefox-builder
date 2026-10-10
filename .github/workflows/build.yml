@@ -26,7 +26,7 @@ jobs:
       FOX_BRANCH: fox_12.1
       FOX_BUILD_TYPE: Unofficial
       FOX_MAINTAINER_PATCH_VERSION: "0"
-      MAINTAINER_NAME: Abdalla Mohamed 
+      MAINTAINER_NAME: Abdalla
       LC_ALL: C
       ALLOW_MISSING_DEPENDENCIES: "true"
       USE_CCACHE: "0"
@@ -470,6 +470,8 @@ jobs:
           #  - while nothing is mounted on $MNT, a USB_STATUS_*.txt file inside it says
           #    what the helper sees (open that folder in the Files tab)
           # Log: /tmp/usb_automount.log (also copied into /tmp/recovery.log)
+          # Debug: /usb_otg_debug.txt (open it in the Files tab, folder /) shows the fstab lines
+          #        and what the recovery itself logged about the USB entry
           MNT="@MNT@"
           LINK="@LINK@"
           LOG=/tmp/usb_automount.log
@@ -487,6 +489,31 @@ jobs:
             echo "disks: $(ls /sys/block 2>/dev/null | grep '^sd' | tr '\n' ' ')"
             echo "link: $LINK -> $(readlink "$LINK" 2>/dev/null)"
             dmesg 2>/dev/null | grep -iE 'usb|xhci|otg|scsi' | tail -n 12
+          }
+
+          # one-file report: what the fstab says, what TWRP/OrangeFox logged, current state
+          write_debug() {
+            {
+              echo "== usb_otg_debug =="
+              echo "mount point: $MNT"
+              echo "link: $LINK -> $(readlink "$LINK" 2>/dev/null)"
+              echo "state: $STATE"
+              echo "mounted: $(grep " $MNT " /proc/mounts)"
+              echo
+              echo "== fstab lines with usb/otg =="
+              for f in /system/etc/recovery.fstab /etc/recovery.fstab /etc/twrp.fstab /system/etc/twrp.flags /etc/twrp.flags /twrp.flags; do
+                [ -f "$f" ] && grep -H -i -n -E 'usb|otg' "$f"
+              done
+              echo
+              echo "== recovery.log: partition entry of the USB mount =="
+              grep -i -A12 -E '/usb[-_]otg \|' /tmp/recovery.log 2>/dev/null | head -n 30
+              echo
+              echo "== recovery.log: other usb/otg lines =="
+              grep -i -E 'usb[-_]otg' /tmp/recovery.log 2>/dev/null | grep -v '^usb_automount' | tail -n 12
+              echo
+              echo "== USB =="
+              usb_report
+            } > /usb_otg_debug.txt 2>/dev/null
           }
 
           # remember the state and, while nothing is mounted on $MNT, show it as a file
@@ -614,6 +641,7 @@ jobs:
           LAST="-"
           DONE=0
           TRIES=0
+          DBGWAIT=5
 
           while true; do
             CAND="$(echo $(list_usb))"
@@ -626,6 +654,7 @@ jobs:
               STATE=""
               DONE=0
               TRIES=0
+              DBGWAIT=2
               if [ -n "$CAND" ]; then
                 sleep 2   # let the partition table settle
                 CAND="$(echo $(list_usb))"
@@ -647,6 +676,10 @@ jobs:
               fi
             else
               check_idle
+            fi
+            if [ "$DBGWAIT" -gt 0 ]; then
+              DBGWAIT=$((DBGWAIT - 1))
+              [ "$DBGWAIT" -eq 0 ] && write_debug
             fi
             sleep 3
           done
@@ -673,13 +706,20 @@ jobs:
               disabled
               seclabel u:r:recovery:s0
 
-          # start early so the USB OTG entry exists before the recovery UI reads the fstab
+          # create the USB OTG "block device" before the recovery UI starts and reads the fstab
+          on early-init
+              mkdir /dev/block 0755 root root
+              symlink /dev/null @LINK@
+
+          # start early as well
           on init
               start usbautomount
 
           on boot
               start usbautomount
           RC_EOF
+
+          sed -i "s|@LINK@|${LINK}|g" "${RC}"
 
           echo "----- USB lines in the tree's fstab files -----"
           grep -rniE --include='*fstab*' --include='*.flags' 'usb|otg' "${TREE}"
