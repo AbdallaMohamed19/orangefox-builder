@@ -17,7 +17,7 @@ jobs:
     env:
       FOX_BRANCH: fox_12.1
       FOX_BUILD_TYPE: Unofficial
-      MAINTAINER_NAME: Abdalla
+      MAINTAINER_NAME: Abdallah mohammed
       DEVICE: mojito
       DEVICE_TREE: mojito
       LC_ALL: C
